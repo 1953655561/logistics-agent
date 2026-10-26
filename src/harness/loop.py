@@ -84,8 +84,8 @@ class AuditLoop:
             r.verdict = audit.get("verdict", "REVIEW")
             r.issues = audit.get("issues", [])
 
-            # 3) 给高危问题补引用（最多 2 条，省预算）
-            highs = [i for i in r.issues if i.get("severity") == "high"][:2]
+            # 3) 给高危问题补引用（最多 4 条，兼顾预算）
+            highs = [i for i in r.issues if i.get("severity") == "high"][:4]
             for it in highs:
                 rid = it.get("rule_id", "")
                 hit = self._run(r, f"检索条款 {rid}",
@@ -93,8 +93,13 @@ class AuditLoop:
                                 "rule.search")
                 if isinstance(hit, dict) and hit.get("hits"):
                     first = hit["hits"][0]
-                    it["citation_text"] = f"依据：{first['title']} · {first['source']}"
-                    r.citations.append({"rule_id": rid, **first})
+                    it["citation_text"] = f"依据：{first.get('section', '')}"
+                    it["citation_chunk"] = first.get("chunk_id", "")
+                    it["citation_excerpt"] = (first.get("text") or "")[:120]
+                    r.citations.append({"rule_id": rid,
+                                        "chunk_id": first.get("chunk_id", ""),
+                                        "section": first.get("section", ""),
+                                        "excerpt": it["citation_excerpt"]})
 
             # 4) 生成说明（LLM，失败可降级）
             r.summary = self._summarize(r)

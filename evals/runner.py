@@ -17,6 +17,28 @@ sys.path.insert(0, ROOT)
 from data.synth.generator import build_case          # noqa: E402
 from data.synth.scenarios import CASES               # noqa: E402
 from src.engine import audit                         # noqa: E402
+from src.harness.loop import AuditLoop               # noqa: E402
+from src.harness.tracing import MemoryTracer         # noqa: E402
+from src.tools.audit_tools import build_registry     # noqa: E402
+
+
+def citation_check() -> dict:
+    """跑一遍 Agent 循环，检查非 PASS 结论是否都带可定位引用。"""
+    total = 0
+    missing = []
+    for case in CASES:
+        built = build_case(case)
+        if built["expected"]["verdict"] == "PASS":
+            continue
+        res = AuditLoop(build_registry(built["docs"]), MemoryTracer()).run(built["case_id"])
+        total += 1
+        no_cite = [i for i in res.issues
+                   if i.get("severity") == "high" and not i.get("citation_chunk")]
+        if no_cite:
+            missing.append({"case": built["case_id"],
+                            "rules": [i["rule_id"] for i in no_cite]})
+    return {"total": total, "missing": missing,
+            "coverage": 1 - len(missing) / total if total else 1.0}
 
 
 def evaluate():
@@ -58,10 +80,11 @@ def evaluate():
     covered = [r for r in rows if not r["requires"]]
     covered_acc = (sum(r["verdict_ok"] for r in covered) / len(covered)) if covered else 1.0
     from src.engine import RULES
+    cite = citation_check()
     return {
         "cases": rows, "n": n, "accuracy": acc, "recall": recall,
         "covered_n": len(covered), "covered_accuracy": covered_acc,
-        "rules_total": len(RULES),
+        "rules_total": len(RULES), "citation": cite,
         "false_positives": fp, "false_positive_case_rate": fp_rate,
         "elapsed_s": elapsed,
     }
@@ -81,10 +104,12 @@ def render(result) -> str:
     lines.append(f"- 缺陷召回率：**{result['recall']:.1%}**")
     lines.append(f"- 误报用例率：**{result['false_positive_case_rate']:.1%}**"
                  f"（误报 {result['false_positives']} 处）")
-    lines.append(f"- 已实现规则：{result['rules_total']} 条（L1 10 / L2 12 / L4 12）")
+    lines.append(f"- 已实现规则：{result['rules_total']} 条（L1 10 / L2 12 / L3 10 / L4 12）")
+    lines.append(f"- 引用覆盖率（非 PASS 的高危问题）：**{result['citation']['coverage']:.1%}**"
+                 f"（{result['citation']['total']} 条用例）")
     lines.append(f"- 耗时：{result['elapsed_s']:.2f}s")
-    lines.append("\n> 注：本轮只实现 L1/L2/L4（34 条规则），L3 申报要素与归类待 W4 实现，"
-                 "因此 L3 类缺陷记为漏检。\n")
+    lines.append("\n> 注：60 条用例的期望值由规则推导 + 自拟内审 SOP 得出，未经报关员标注；"
+                 "容差阈值属假设，详见 `docs/02` 第 5 节。\n")
 
     lines.append("## 分类别准确率\n")
     lines.append("| 期望结论 | 用例数 | 判定正确 | 准确率 |")

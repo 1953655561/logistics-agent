@@ -35,3 +35,9 @@ class ApproverPort(Protocol):
     def request(self, request: Any) -> Any:
         """返回 Decision(approved, comment, approver)。"""
         ...
+
+
+@runtime_checkable
+class RetrieverPort(Protocol):
+    def search(self, query: str, top_k: int = 3) -> list[dict]: ...
+    def cite(self, chunk_id: str) -> dict | None: ...

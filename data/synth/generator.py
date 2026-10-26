@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 
+from src.domain.elements import fill
+
 BASE_ITEM = {
     "name": "塑料制玩具配件",
     "name_en": "PLASTIC TOY PARTS",
@@ -19,7 +21,7 @@ BASE_ITEM = {
 
 def _items(spec):
     out = []
-    for i, (name, hs, qty, price) in enumerate(spec, 1):
+    for name, hs, qty, price in spec:
         out.append({
             "name": name, "name_en": name, "hs_code": hs, "qty": qty,
             "unit": "个", "unit_price": price, "amount": round(qty * price, 2),
@@ -40,6 +42,8 @@ def make_docs(**kw):
         for it in items:
             it["unit_price"] = kw["price"]
             it["amount"] = round(it["qty"] * it["unit_price"], 2)
+    for it in items:                     # 按编码补申报要素默认值
+        fill(it)
     subtotal = round(sum(it["amount"] for it in items), 2)
     discount = kw.get("discount", 0.0)
     commission = kw.get("commission", 0.0)
@@ -146,6 +150,22 @@ def make_docs(**kw):
 
 
 # ---------------- 缺陷注入 ----------------
+def _decl_items(d):
+    return d["declaration"]["items"]
+
+
+def _set_items(d, hs=None, name=None, refill=True):
+    """改编码/品名（四单同步），并重算申报要素。"""
+    for doc in ("invoice", "packing_list", "bl", "declaration"):
+        for it in d[doc]["items"]:
+            if hs:
+                it["hs_code"] = hs
+            if name:
+                it["name"] = name
+            if refill:
+                fill(it)
+
+
 def m_amount_0975(d):
     d["declaration"]["total_amount"] = round(d["declaration"]["total_amount"] * 0.9975, 2)
 
@@ -158,20 +178,24 @@ def m_amount_098(d):
     d["declaration"]["total_amount"] = round(d["declaration"]["total_amount"] * 0.98, 2)
 
 
+def m_amount_9995(d):
+    d["declaration"]["total_amount"] = round(d["declaration"]["total_amount"] * 0.9995, 2)
+
+
 def m_qty_900(d):
-    for it in d["declaration"]["items"]:
+    for it in _decl_items(d):
         it["qty"] = 900
     d["declaration"]["qty_total"] = 900
 
 
 def m_qty_980(d):
-    for it in d["declaration"]["items"]:
+    for it in _decl_items(d):
         it["qty"] = 980
     d["declaration"]["qty_total"] = 980
 
 
 def m_qty_990(d):
-    for it in d["declaration"]["items"]:
+    for it in _decl_items(d):
         it["qty"] = 990
     d["declaration"]["qty_total"] = 990
 
@@ -257,33 +281,29 @@ def m_agreement_no_cert(d):
 
 
 def m_old_machine(d):
-    for it in d["declaration"]["items"]:
-        it["name"] = "旧机电设备"
+    _set_items(d, hs="8471300000", name="旧机电（笔记本电脑）")
 
 
 def m_solid_waste(d):
-    for it in d["declaration"]["items"]:
-        it["name"] = "固体废物（废塑料）"
-
-
-def m_food_no_reg(d):
-    for it in d["declaration"]["items"]:
-        it["hs_code"] = "1905310000"
-    d["declaration"]["overseas_reg_no"] = ""
+    _set_items(d, hs="3915100000", name="固体废物（废塑料）")
 
 
 def m_food(d):
-    for it in d["declaration"]["items"]:
-        it["hs_code"] = "1905310000"
+    _set_items(d, hs="1905310000", name="饼干")
 
 
-def m_no_label(d):
+def m_food_no_reg(d):
+    _set_items(d, hs="1905310000", name="饼干")
+    d["declaration"]["overseas_reg_no"] = ""
+
+
+def m_food_no_label(d):
+    _set_items(d, hs="1905310000", name="饼干")
     d["declaration"]["label_filed"] = False
 
 
 def m_dual_anti(d):
-    for it in d["declaration"]["items"]:
-        it["hs_code"] = "7210490000"
+    _set_items(d, hs="7210490000", name="镀锌钢板")
 
 
 def m_royalty(d):
@@ -292,8 +312,7 @@ def m_royalty(d):
 
 
 def m_hs_conflict(d):
-    for it in d["declaration"]["items"]:
-        it["hs_code"] = "3917400000"
+    _set_items(d, hs="3917400000")
 
 
 def m_late_declare(d):
@@ -314,11 +333,6 @@ def m_wood_no_ippc(d):
     d["packing_list"]["ippc_mark"] = False
 
 
-def m_spec_conflict(d):
-    for it in d["declaration"]["items"]:
-        it["name"] = "不锈钢塑料制配件"
-
-
 def m_packing_name(d):
     for it in d["packing_list"]["items"]:
         it["name"] = "塑料玩具配件"
@@ -329,24 +343,57 @@ def m_unit_pack(d):
         it["unit"] = "件"
 
 
-def m_amount_9995(d):
-    d["declaration"]["total_amount"] = round(d["declaration"]["total_amount"] * 0.9995, 2)
-
-
 def m_no_legal_unit1(d):
-    for it in d["declaration"]["items"]:
+    for it in _decl_items(d):
         it["legal_unit1"] = ""
 
 
+def m_set_tshirt(d):
+    _set_items(d, hs="6109100021", name="棉制针织T恤")
+
+
 def m_name_polyester(d):
-    for it in d["declaration"]["items"]:
-        it["name"] = "化纤制T恤"
+    _set_items(d, name="化纤制T恤", refill=False)
 
 
-def m_food_no_label(d):
-    for it in d["declaration"]["items"]:
-        it["hs_code"] = "1905310000"
-    d["declaration"]["label_filed"] = False
+def m_name_stainless(d):
+    _set_items(d, name="不锈钢塑料制玩具配件", refill=False)
+
+
+def m_drop_material(d):
+    for it in _decl_items(d):
+        it["elements"].pop("material", None)
+
+
+def m_drop_use(d):
+    for it in _decl_items(d):
+        it["elements"].pop("use", None)
+
+
+def m_drop_brand_type(d):
+    for it in _decl_items(d):
+        it["elements"].pop("brand_type", None)
+
+
+def m_drop_process(d):
+    for it in _decl_items(d):
+        it["elements"].pop("process", None)
+
+
+def _scale_composition(d, ratio):
+    for it in _decl_items(d):
+        comp = it["elements"].get("composition")
+        if comp:
+            for c in comp:
+                c["pct"] = round(c["pct"] * ratio, 2)
+
+
+def m_composition_95(d):
+    _scale_composition(d, 0.95)
+
+
+def m_composition_90(d):
+    _scale_composition(d, 0.90)
 
 
 MUTATORS = {k[2:]: v for k, v in list(globals().items()) if k.startswith("m_")}

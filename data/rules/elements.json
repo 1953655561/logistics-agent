@@ -1,0 +1,231 @@
+{
+  "_comment": "20 个常见进口品类的规范申报要素（10 位编码）。value 为默认值，仅用于合成数据与测试。",
+  "9503008900": {
+    "name": "塑料制玩具",
+    "chapter": "95",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "塑料"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "儿童玩具"},
+      {"key": "spec", "name": "规格型号", "type": "text", "required": true, "value": "通用"}
+    ]
+  },
+  "9503006000": {
+    "name": "毛绒玩具",
+    "chapter": "95",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "涤纶"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "儿童玩具"},
+      {"key": "spec", "name": "规格型号", "type": "text", "required": true, "value": "30cm"}
+    ]
+  },
+  "8509400000": {
+    "name": "食品研磨机",
+    "chapter": "85",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "境内自主品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "不锈钢"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "家庭厨房"},
+      {"key": "power", "name": "功率", "type": "text", "required": true, "value": "300W"}
+    ]
+  },
+  "8516600000": {
+    "name": "电烤箱",
+    "chapter": "85",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "境内自主品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "不锈钢"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "家庭烘焙"},
+      {"key": "capacity", "name": "容量", "type": "text", "required": true, "value": "30L"}
+    ]
+  },
+  "9405100000": {
+    "name": "吊灯",
+    "chapter": "94",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "铁"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "室内照明"},
+      {"key": "light_source", "name": "光源类型", "type": "text", "required": true, "value": "LED"}
+    ]
+  },
+  "9405200000": {
+    "name": "台灯",
+    "chapter": "94",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "塑料"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "阅读照明"},
+      {"key": "light_source", "name": "光源类型", "type": "text", "required": true, "value": "LED"}
+    ]
+  },
+  "6109100021": {
+    "name": "棉制针织T恤",
+    "chapter": "61",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "棉"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "穿着"},
+      {"key": "composition", "name": "成分含量", "type": "composition", "required": true,
+       "value": [{"name": "棉", "pct": 100}]},
+      {"key": "process", "name": "工艺", "type": "text", "required": true, "value": "未漂白"}
+    ]
+  },
+  "6205200090": {
+    "name": "男式棉制衬衫",
+    "chapter": "62",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "棉"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "穿着"},
+      {"key": "composition", "name": "成分含量", "type": "composition", "required": true,
+       "value": [{"name": "棉", "pct": 100}]},
+      {"key": "style", "name": "款式", "type": "text", "required": true, "value": "长袖"}
+    ]
+  },
+  "3924900000": {
+    "name": "塑料日用品",
+    "chapter": "39",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "聚乙烯"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "家居收纳"}
+    ]
+  },
+  "3917400000": {
+    "name": "PVC管件",
+    "chapter": "39",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "聚氯乙烯"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "管道连接"},
+      {"key": "spec", "name": "规格型号", "type": "text", "required": true, "value": "DN50"}
+    ]
+  },
+  "7210490000": {
+    "name": "镀锌钢板",
+    "chapter": "72",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "钢"},
+      {"key": "spec", "name": "规格型号", "type": "text", "required": true, "value": "1250mm"},
+      {"key": "thickness", "name": "厚度", "type": "text", "required": true, "value": "1.0mm"}
+    ]
+  },
+  "7306300000": {
+    "name": "焊接钢管",
+    "chapter": "73",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "钢"},
+      {"key": "diameter", "name": "管径", "type": "text", "required": true, "value": "50mm"},
+      {"key": "spec", "name": "规格型号", "type": "text", "required": true, "value": "6m"}
+    ]
+  },
+  "1905310000": {
+    "name": "饼干",
+    "chapter": "19",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "境外品牌(其他)"},
+      {"key": "material", "name": "配料", "type": "text", "required": true, "value": "小麦粉"},
+      {"key": "composition", "name": "成分含量", "type": "composition", "required": true,
+       "value": [{"name": "小麦粉", "pct": 70}, {"name": "糖", "pct": 20}, {"name": "油脂", "pct": 10}]},
+      {"key": "shelf_life", "name": "保质期", "type": "text", "required": true, "value": "12个月"},
+      {"key": "label", "name": "中文标签", "type": "text", "required": true, "value": "已备案"}
+    ]
+  },
+  "2202100000": {
+    "name": "碳酸饮料",
+    "chapter": "22",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "境外品牌(其他)"},
+      {"key": "material", "name": "配料", "type": "text", "required": true, "value": "水、糖、二氧化碳"},
+      {"key": "composition", "name": "成分含量", "type": "composition", "required": true,
+       "value": [{"name": "水", "pct": 88}, {"name": "糖", "pct": 10}, {"name": "二氧化碳", "pct": 2}]},
+      {"key": "sugar", "name": "含糖量", "type": "text", "required": true, "value": "10g/100ml"},
+      {"key": "shelf_life", "name": "保质期", "type": "text", "required": true, "value": "9个月"}
+    ]
+  },
+  "0402100000": {
+    "name": "奶粉",
+    "chapter": "04",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "境外品牌(其他)"},
+      {"key": "composition", "name": "成分含量", "type": "composition", "required": true,
+       "value": [{"name": "乳固体", "pct": 96}, {"name": "水分", "pct": 4}]},
+      {"key": "shelf_life", "name": "保质期", "type": "text", "required": true, "value": "24个月"},
+      {"key": "reg_no", "name": "境外注册号", "type": "text", "required": true, "value": "CN-REG-0001"}
+    ]
+  },
+  "3304990000": {
+    "name": "护肤品",
+    "chapter": "33",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "境外品牌(其他)"},
+      {"key": "material", "name": "成分", "type": "text", "required": true, "value": "甘油、水"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "面部保湿"},
+      {"key": "shelf_life", "name": "保质期", "type": "text", "required": true, "value": "36个月"}
+    ]
+  },
+  "8471300000": {
+    "name": "笔记本电脑",
+    "chapter": "84",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "境外品牌(其他)"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "铝合金"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "办公"},
+      {"key": "cpu", "name": "处理器", "type": "text", "required": true, "value": "i5"},
+      {"key": "screen", "name": "屏幕尺寸", "type": "text", "required": true, "value": "14英寸"}
+    ]
+  },
+  "8517120000": {
+    "name": "手机",
+    "chapter": "85",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "境外品牌(其他)"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "玻璃"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "移动通信"},
+      {"key": "screen", "name": "屏幕尺寸", "type": "text", "required": true, "value": "6.1英寸"}
+    ]
+  },
+  "3926909090": {
+    "name": "其他塑料制品",
+    "chapter": "39",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "无品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "聚丙烯"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "工业配件"}
+    ]
+  },
+  "7321110000": {
+    "name": "燃气灶",
+    "chapter": "73",
+    "elements": [
+      {"key": "brand_type", "name": "品牌类型", "type": "enum", "required": true,
+       "values": ["无品牌", "境内自主品牌", "境内收购品牌", "境外品牌(贴牌生产)", "境外品牌(其他)"], "value": "境内自主品牌"},
+      {"key": "material", "name": "材质", "type": "text", "required": true, "value": "不锈钢"},
+      {"key": "use", "name": "用途", "type": "text", "required": true, "value": "家庭烹饪"},
+      {"key": "power", "name": "热负荷", "type": "text", "required": true, "value": "4.0kW"}
+    ]
+  }
+}

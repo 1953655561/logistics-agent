@@ -17,10 +17,10 @@
 
 ## 当前状态
 
-- 阶段：**W3 完成**（端口-适配器、工具层、六态状态机、CLI 全流程、37 条测试），W4（L3 + RAG 引用链）待开始。
-- 决策：D1–D12 已锁定，见 `docs/00-project-context.md` 第 5 节。
-- 指标：`make eval` 生成 `evals/report/report.md`，当前覆盖内准确率 100%、误报 0、召回 74.4%（L3 未实现）。
-- 跑单票：`python -m src.app.cli audit IMP-0025 --auto --offline`
+- 阶段：**W4 完成**（44 条规则全实现 + RAG 混合检索 + 引用链，56 条测试全绿），W4.5（补洞包：多 Agent / MCP / 红队 / Judge / 成本限流幂等）待开始。
+- 决策：D1–D13 已锁定，见 `docs/00-project-context.md` 第 5 节。
+- 指标：`make eval` → 准确率 100%、召回 100%、误报 0、引用覆盖 100%（60 条用例）。
+- 跑单票：`python -m src.app.cli audit IMP-0043 --auto --offline`
 
 ## 风格约定
 

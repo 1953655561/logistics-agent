@@ -5,10 +5,8 @@ import json
 
 from ..common import get as get_path
 from ..engine import audit
-from ..registry import RULES
+from ..rag.retriever import default_retriever
 from ..harness.tools import Tool, ToolRegistry
-
-_RULE_META = {r["id"]: r for r in RULES}
 
 
 def build_registry(docs: dict) -> ToolRegistry:
@@ -71,22 +69,18 @@ def build_registry(docs: dict) -> ToolRegistry:
     ))
 
     def rule_search(query: str, top_k: int = 3):
-        q = (query or "").strip().upper()
-        hits = []
-        for rid, meta in _RULE_META.items():
-            hay = f"{rid} {meta['title']} {meta['source']}".upper()
-            if q and q in hay:
-                hits.append({"rule_id": rid, "title": meta["title"], "source": meta["source"]})
-        if not hits and q:
-            for rid, meta in _RULE_META.items():
-                if any(tok and tok in (meta["title"] + meta["source"]).upper()
-                       for tok in [q]):
-                    hits.append({"rule_id": rid, "title": meta["title"], "source": meta["source"]})
-        return {"hits": hits[:top_k]}
+        hits = default_retriever().search(query, top_k=top_k)
+        out = []
+        for h in hits:
+            item = {k: h.get(k) for k in ("chunk_id", "doc", "section", "text", "score")}
+            if h.get("rule_id"):
+                item["rule_id"] = h["rule_id"]
+            out.append(item)
+        return {"hits": out}
 
     reg.register(Tool(
         name="rule.search",
-        description="按规则编号或关键词检索条款来源，用于给结论补充引用",
+        description="混合检索规则库与要素目录，返回带定位信息的条款片段（chunk_id 可回查原文）",
         schema={
             "type": "object",
             "properties": {"query": {"type": "string"},

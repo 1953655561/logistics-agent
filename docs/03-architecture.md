@@ -99,6 +99,12 @@ CLI / 将来的 FastAPI / AntD 审核台
 | `src/adapters/llm_*.py` | mock / OpenAI 兼容 | 没配 key 自动降级 mock |
 | `src/application/audit_case.py` | 用例编排：跑循环 → 审批 → 落库 | 不含框架、不直接读文件 |
 | `src/app/cli.py` | 组装根与命令行 | `audit / resume / list / show` |
+| `src/rules/l3_elements.py` | 申报要素与归类（10 条） | 目录驱动；L3-29 只建议不改判 |
+| `src/domain/elements.py` | 要素目录加载与默认填充 | 生成器与规则共用，避免两处漂移 |
+| `src/rag/tokenize.py` | CJK 二元组 + 英文词 | 无第三方分词 |
+| `src/rag/corpus.py` | 从规则文档与要素目录切 chunk | 产出 `chunk_id`，可回查原文 |
+| `src/rag/index.py` | BM25 + 特征哈希向量 + 重排 | md5 定桶，跨进程可复现 |
+| `src/rag/retriever.py` | `search()` / `cite()` | 实现 `ports.RetrieverPort` |
 
 ## 为什么规则函数签名是 `(ctx) -> RuleResult`
 
@@ -150,11 +156,30 @@ RETURNED ──► REVIEWING（补正后重审）
 审批策略（`approval.py`）：`REJECT`/`REVIEW` 必审；`FIX` 且含 high 问题必审；其余自动通过。
 审批人可换实现：`AutoApprover`（演示）、`ScriptedApprover`（测试）、`CliApprover`（交互）。
 
+## 7. RAG 设计（W4）
+
+```
+corpus.py   规则文档表格行 + 要素目录 → 64 个 chunk（每个带 chunk_id / section / rule_id）
+   │
+index.py    tokenize(CJK 二元组) → BM25(0.65) + 特征哈希向量(0.35) → 重排
+   │        —— 规则编号/编码精确命中 +1.0/+0.8
+retriever   search(query, top_k) → [{chunk_id, section, text, score}]
+   │        cite(chunk_id) → 回查原文
+tool        rule.search  →  Agent 循环调它补引用
+```
+
+**为什么不用真 embedding**：当前约束是零依赖、断网可跑。特征哈希 + BM25 在“规则条款”这种
+短文本、术语密集的语料上召回够用（评测里 100% 覆盖）。真要换 bge-m3，实现一个
+`RetrieverPort` 即可，上层不动。
+
+**重排为什么必须有**：纯 BM25 搜 “L4-41” 会召回 “L4-40”，因为分词后只是 `l4` + `41`。
+加“编号精确命中”后第一条才是对的——这是实测出来的，不是设计出来的。
+
 ## 已知限制
 
-- `L3` 未实现：申报要素目录、归类相似库、LLM 判断都在 W4。
+- 语料是 **64 个 chunk 的小库**，只覆盖规则与要素，没有真实法规全文。
 - 名录表是缩小版（3C/禁限/双反各十来条），只够跑评测。
-- 没有并发与性能测试（W5 补）；当前 60 条用例 0.08s，单票毫秒级。
+- 没有并发与性能测试（W5 补）；当前 60 条用例 0.09s，单票毫秒级。
 - Web 层未开始（W5）；目前只有 CLI。
 - 成本统计只留了字段，mock 模型下无 token 成本，接真实模型后才准。
 
