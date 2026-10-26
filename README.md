@@ -2,7 +2,7 @@
 
 进口一般贸易报关单证的智能审核：四单一致性、申报要素、归类建议、监管证件，输出「可申报 / 可补正 / 需复核 / 不可申报」。
 
-> 状态：W2 完成 —— 34 条确定性规则跑通，60 条用例可复现，覆盖内准确率 100%、误报 0。
+> 状态：W3 完成 —— 规则引擎 + Agent 循环 + 六态审批状态机 + CLI 全流程；37 条测试全绿。
 > 交接入口：[`AGENTS.md`](AGENTS.md) → [`docs/00-project-context.md`](docs/00-project-context.md)
 
 ## 为什么做这个
@@ -36,10 +36,20 @@ evals/  cases · runner · report
 无需第三方依赖，Python 3.9+ 即可：
 
 ```bash
-make test        # 单元测试
+make test        # 单元测试（37 条）
 make eval        # 跑 60 条评测，生成 evals/report/report.md
-make show ID=IMP-0019   # 看单条用例的审核明细
+make show ID=IMP-0019   # 看单条用例的规则明细
+
+# 跑一票单证的完整流程（含工具调用、trace、审批）
+python -m src.app.cli audit IMP-0025 --auto --offline
+python -m src.app.cli audit IMP-0025 --pause     # 挂起在待审批
+python -m src.app.cli resume IMP-0025 --auto     # 续跑审批
+python -m src.app.cli list
+python -m src.app.cli show IMP-0025
 ```
+
+接真实模型：设置 `LOGIAGENT_LLM_API_KEY` / `LOGIAGENT_LLM_BASE_URL` / `LOGIAGENT_LLM_MODEL`，
+去掉 `--offline` 即可；未配置时自动降级到 mock。
 
 当前指标（W2）：
 

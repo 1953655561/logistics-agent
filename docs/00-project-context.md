@@ -1,6 +1,6 @@
 # 00 · 项目上下文（交接必读）
 
-> 最后更新：2026-10-26 ｜ 状态：W2 完成，W3 待启动
+> 最后更新：2026-10-26 ｜ 状态：W3 完成，W4 待启动
 > 这份文档是「给下一个会话看的」。读完它，你应该能直接接着干，不需要再问用户背景。
 
 ---
@@ -65,6 +65,8 @@
 | D8 | 部署 | 本地 Docker + 一键 `make demo` |
 | D9 | 数据合规 | README/报告设「数据来源与合规」章节：全合成、无真实企业信息 |
 | D10 | FDE 配套 | 《报关员使用手册》+ 反馈闭环设计，对应 JD 第 5 条 |
+| D11 | 架构风格 | **端口-适配器（六边形）**：`domain` 零依赖，框架只出现在 `adapters`，`app` 只做组装 |
+| D12 | 前端 | **Ant Design 5 + React 18 + TypeScript + Vite + TanStack Query**；**不用 Tailwind**（避免 reset 与 AntD 冲突），样式走 AntD token + CSS Modules；另留无构建兜底页 |
 
 ## 6. 架构总览
 
@@ -122,7 +124,7 @@ logistics-agent/
 |---|---|---|
 | W1 | 规则库 + 60 票合成数据规格 + 评测集定稿 | ✅ 规则库与评测规范完成（v1.1 修正后） |
 | W2 | 数据生成器 + 解析/比对引擎（确定性部分） | ✅ 完成：34 条规则跑通，60 条用例可复现，覆盖内准确率 100%，误报 0 |
-| W3 | Harness + 工具层 + 审批状态机 | ⬜ |
+| W3 | Harness + 工具层 + 审批状态机 | ✅ 完成：端口-适配器拆分、工具校验/超时/重试、六态状态机、CLI 全流程、37 条测试 |
 | W4 | RAG + 归类建议 + 引用链 | ⬜ |
 | W5 | 评测调优 + Web 审核台 | ⬜ |
 | W6 | Docker、文档、演示脚本、面试问答卡 | ⬜ |
@@ -153,27 +155,25 @@ logistics-agent/
 2. **境内目的地不是国别**：`L1-10` 原先拿 `destination` 去匹配国别表，导致所有正常单据误报。已改为只校验启运国。
 3. 这两条都是**评测跑出来的**，不是审出来的——说明先写评测再写代码是对的。
 
-## 12. 下一步（W3 具体任务）
+## 12. 下一步（W4 具体任务）
 
-W2 已交付：`src/common.py`、`src/issue.py`、`src/registry.py`、`src/engine.py`、`src/rules/l1_format.py`、
-`src/rules/l2_consistency.py`、`src/rules/l4_compliance.py`、`data/synth/{generator,scenarios}.py`、
-`evals/runner.py`、`tests/test_rules.py`。指标见 `evals/report/report.md`。
+W3 已交付（结构见 `docs/03` 第 6 节）：`src/ports.py`、`src/harness/{tools,loop,approval,state,tracing}.py`、
+`src/adapters/{llm_mock,llm_openai,sqlite_repo}.py`、`src/application/audit_case.py`、`src/app/cli.py`、
+`src/tools/audit_tools.py`、`tests/test_harness.py`（37 条测试全绿）。
 
-W3 要做的是 **Harness 七件套 + 工具层 + 审批状态机**，建议顺序：
+W4 目标：**补上 L3（申报要素与归类）+ RAG 引用链**。
 
-1. `src/harness/loop.py`：Plan→Tool→Observe→Reflect，步数预算 8；结论落 `Report`。
-2. `src/harness/tools.py`：JSON Schema 注册 + 参数校验 + 超时 + 重试；先包 3 个工具
-   （`doc.get`、`rule.search`（先用规则库直查）、`case.create`）。
-3. `src/harness/approval.py` + `state.py`：审核单状态机（draft→reviewing→pending_approval→done/returned），
-   持久化到 `var/audit.db`（sqlite3，标准库），中断可续跑。
-4. `src/harness/tracing.py`：JSONL，每步记录工具、参数、耗时；成本字段先置 0（mock 模型无 token 成本）。
-5. `src/harness/llm.py`：Provider 抽象（`mock` / `openai_compat`），mock 用确定性桩，保证评测可复现。
-6. 把 `engine.audit` 接到工具层，CLI：`python -m src.app.cli IMP-0019`。
+1. `data/rules/elements.json`：20 个品类的 10 位编码 → 规范申报要素集（品牌类型、材质、用途…）。
+2. `src/rag/`：`chunk → index(BM25 + 特征哈希向量) → hybrid search → rerank → cite`，
+   实现 `ports.RetrieverPort`；语料用规则库 + 要素说明 + 监管条件。
+3. 把 `rule.search` 工具换成 RAG 实现（接口不变，工具层零改动）。
+4. L3 确定性规则：L3-23/24/27/28/30/31/32（依赖要素表）。
+5. L3 判断类：L3-25/26/29 走 LLM（provider 已就绪，mock 与真实模型都要能跑）。
+6. 引用链：issue → chunk_id → 原文片段，CLI 里可点开（后续 Web 直接复用）。
+7. 评测：7 条 `requires=["L3"]` 用例转绿，整体召回 ≥ 90%。
 
-**验收标准（W3）**：一条命令跑完单个 case 的全流程，产出带 trace 的审核单；审批拒绝路径有测试；
-`make test` 全绿。
-
-**注意**：W3 仍然不需要联网、不需要第三方包。LLM 只在 L3 判断里用，其余保持确定性。
+**验收标准**：`make eval` 全量准确率 ≥ 95%；每条非 PASS 结论都能给出可定位引用；
+`make test` 全绿；仍然零第三方依赖。
 
 ## 13. 风险
 
