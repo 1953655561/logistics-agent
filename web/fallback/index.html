@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>关务智能审核台 · 无构建兜底页</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --panel: #fff; --ink: #1f2937; --muted: #6b7280;
+    --line: #e5e7eb; --brand: #1d4ed8; --brand-weak: #e8efff;
+    --pass: #15803d; --fix: #b45309; --review: #b91c1c; --reject: #7f1d1d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.55 "Segoe UI", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--ink); }
+  header { background: #0f172a; color: #fff; padding: 14px 24px;
+           display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  header .sub { color: #93c5fd; font-size: 12px; }
+  main { max-width: 1240px; margin: 20px auto; padding: 0 20px 40px; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  button, select { font: inherit; border: 1px solid var(--line); background: #fff;
+                   border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button.danger { color: var(--review); border-color: #fecaca; background: #fff5f5; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; }
+  @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, .04); overflow: hidden; }
+  .card h2 { font-size: 14px; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line);
+             background: #fafbfc; }
+  .card .body { padding: 14px 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfc; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--brand-weak); }
+  tbody tr.active { background: var(--brand-weak); }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+         border: 1px solid transparent; white-space: nowrap; }
+  .tag.PASS { color: var(--pass); background: #ecfdf5; border-color: #a7f3d0; }
+  .tag.FIX { color: var(--fix); background: #fffbeb; border-color: #fde68a; }
+  .tag.REVIEW { color: var(--review); background: #fef2f2; border-color: #fecaca; }
+  .tag.REJECT { color: var(--reject); background: #fef2f2; border-color: #fca5a5; }
+  .tag.gray { color: var(--muted); background: #f3f4f6; border-color: var(--line); }
+  .muted { color: var(--muted); }
+  .kv { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  .issues { display: flex; flex-direction: column; gap: 10px; }
+  .issue { border: 1px solid var(--line); border-left: 3px solid var(--line);
+           border-radius: 8px; padding: 9px 12px; }
+  .issue.high { border-left-color: var(--review); }
+  .issue.mid { border-left-color: var(--fix); }
+  .issue.low { border-left-color: #9ca3af; }
+  .issue .top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .issue .msg { margin-top: 4px; }
+  .issue .cite { margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .steps { list-style: none; margin: 0; padding: 0; }
+  .steps li { padding: 6px 0 6px 18px; border-left: 2px solid var(--line); position: relative; }
+  .steps li::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                      background: var(--brand); position: absolute; left: -4.5px; top: 13px; }
+  .steps .ms { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  textarea { width: 100%; min-height: 68px; font: inherit; padding: 8px; border: 1px solid var(--line);
+             border-radius: 6px; resize: vertical; }
+  .empty { padding: 28px; text-align: center; color: var(--muted); }
+  .banner { display: none; margin-bottom: 12px; padding: 8px 12px; border-radius: 6px;
+            background: #fef2f2; color: var(--review); border: 1px solid #fecaca; }
+  .banner.show { display: block; }
+  .approve-row { display: flex; gap: 8px; margin-top: 10px; }
+  .mono { font-family: ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>关务智能审核台</h1>
+  <span class="sub">无构建兜底页 · 与 AntD 版共用 /api</span>
+</header>
+<main>
+  <div class="toolbar">
+    <select id="scenario"></select>
+    <button class="primary" id="newAudit">新建审核</button>
+    <button id="refresh">刷新列表</button>
+    <span class="muted" id="hint"></span>
+  </div>
+  <div class="banner" id="error"></div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>审核单</h2>
+      <div class="body" style="padding:0">
+        <table>
+          <thead><tr>
+            <th>审核单</th><th>标题</th><th>状态</th><th>结论</th>
+            <th>问题</th><th>成本</th><th>更新</th>
+          </tr></thead>
+          <tbody id="cases"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="detailCard">
+      <h2>单票详情</h2>
+      <div class="body" id="detail">
+        <div class="empty">从左侧选择一票审核单</div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentId = null;
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+function tag(text, cls) { return `<span class="tag ${esc(cls || "gray")}">${esc(text || "-")}</span>`; }
+function money(v) { return "¥" + Number(v || 0).toFixed(6); }
+function showError(msg) {
+  const el = $("error");
+  if (!msg) { el.className = "banner"; el.textContent = ""; return; }
+  el.className = "banner show"; el.textContent = msg;
+}
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+  });
+  let data = {};
+  try { data = await res.json(); } catch (_) { /* ignore */ }
+  if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+  return data;
+}
+
+async function loadScenarios() {
+  const rows = await api("/api/scenarios");
+  $("scenario").innerHTML = rows.map(
+    (r) => `<option value="${esc(r.id)}">${esc(r.id)} · ${esc(r.title)}（期望 ${esc(r.expected)}）</option>`
+  ).join("");
+}
+
+async function loadCases() {
+  try {
+    showError("");
+    const rows = await api("/api/cases");
+    const tbody = $("cases");
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无审核单，点“新建审核”开始</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map((r) => `
+      <tr data-id="${esc(r.case_id)}" class="${r.case_id === currentId ? "active" : ""}">
+        <td class="mono">${esc(r.case_id)}</td>
+        <td>${esc(r.title)}</td>
+        <td>${tag(r.state, r.state === "PENDING_APPROVAL" ? "FIX" : "gray")}</td>
+        <td>${tag(r.verdict)}</td>
+        <td>${r.issue_count}</td>
+        <td>${money(r.cost)}</td>
+        <td class="muted">${esc(r.updated_at)}</td>
+      </tr>`).join("");
+    tbody.querySelectorAll("tr[data-id]").forEach((tr) => {
+      tr.onclick = () => openCase(tr.dataset.id);
+    });
+  } catch (e) {
+    showError("加载审核单失败：" + e.message);
+  }
+}
+
+function issueHtml(it) {
+  const sev = it.severity || "low";
+  const cite = it.citation_text || it.citation || "";
+  const ev = it.evidence && Object.keys(it.evidence).length
+    ? `<div class="cite mono">${esc(JSON.stringify(it.evidence))}</div>` : "";
+  return `<div class="issue ${esc(sev)}">
+    <div class="top"><span class="mono">${esc(it.rule_id)}</span>${tag(sev, sev === "high" ? "REVIEW" : sev === "mid" ? "FIX" : "gray")}</div>
+    <div class="msg">${esc(it.message)}</div>
+    ${cite ? `<div class="cite">依据：${esc(cite)}</div>` : ""}${ev}
+  </div>`;
+}
+
+function stepsHtml(steps) {
+  if (!steps || !steps.length) return '<div class="muted">无</div>';
+  return `<ul class="steps">` + steps.map((s) => `
+    <li>${esc(s.name)} <span class="mono muted">${esc(s.tool || "")}</span>
+        <span class="ms">${Number(s.ms || 0).toFixed(2)} ms</span>
+        ${s.ok === false ? tag("失败", "REVIEW") : ""}</li>`).join("") + `</ul>`;
+}
+
+function renderDetail(r) {
+  const review = r.review || {};
+  const issues = r.issues || [];
+  const reviewHtml = Object.keys(review).length ? `
+    <div class="kv" style="margin-bottom:10px">
+      <div>复核</div><div>${tag(review.recommendation || "agree", "gray")} ${esc(review.reason || "")}</div>
+      <div>来源</div><div>${esc(review.source || "-")}</div>
+    </div>` : "";
+  const approvalHtml = r.state === "PENDING_APPROVAL" ? `
+    <div style="margin-top:14px">
+      <div class="muted">审批意见（退回必填）</div>
+      <textarea id="comment" placeholder="例如：请补充 3C 证书后重报"></textarea>
+      <div class="approve-row">
+        <button class="primary" id="approveBtn">通过</button>
+        <button class="danger" id="returnBtn">退回</button>
+      </div>
+    </div>` : (r.approval ? `
+    <div class="kv" style="margin-top:14px">
+      <div>审批</div><div>${esc(r.approval.approver)} ${r.approval.approved ? "通过" : "退回"}</div>
+      <div>意见</div><div>${esc(r.approval.comment || "-")}</div>
+    </div>` : "");
+
+  $("detail").innerHTML = `
+    <div class="kv">
+      <div>审核单</div><div class="mono">${esc(r.case_id)} ${tag(r.state, r.state === "PENDING_APPROVAL" ? "FIX" : "gray")}</div>
+      <div>标题</div><div>${esc(r.title)}</div>
+      <div>结论</div><div>${tag(r.verdict)} ${esc(r.summary || "")}</div>
+      <div>成本</div><div>${money(r.cost)} · ${esc((r.usage || {}).calls || 0)} 次模型调用</div>
+      <div>护栏</div><div>${(r.guard || []).length ? tag((r.guard || []).length + " 条", "FIX") : tag("无", "gray")}</div>
+    </div>
+    ${reviewHtml}
+    <h3 style="font-size:13px;margin:16px 0 8px">问题清单</h3>
+    <div class="issues">${issues.length ? issues.map(issueHtml).join("") : '<div class="muted">无问题，可直接申报</div>'}</div>
+    <h3 style="font-size:13px;margin:18px 0 8px">处理轨迹</h3>
+    ${stepsHtml(r.steps)}
+    ${approvalHtml}
+  `;
+
+  if (r.state === "PENDING_APPROVAL") {
+    $("approveBtn").onclick = () => decide(r.case_id, true);
+    $("returnBtn").onclick = () => decide(r.case_id, false);
+  }
+}
+
+async function openCase(id) {
+  try {
+    currentId = id;
+    document.querySelectorAll("#cases tr[data-id]").forEach((tr) => {
+      tr.classList.toggle("active", tr.dataset.id === id);
+    });
+    const r = await api("/api/cases/" + encodeURIComponent(id));
+    renderDetail(r);
+  } catch (e) {
+    showError("加载详情失败：" + e.message);
+  }
+}
+
+async function decide(id, approved) {
+  const comment = ($("comment") || {}).value || "";
+  if (!approved && !comment.trim()) {
+    showError("退回必须填写理由");
+    return;
+  }
+  try {
+    showError("");
+    await api("/api/cases/" + encodeURIComponent(id) + "/approve", {
+      method: "POST",
+      body: JSON.stringify({ approved, comment }),
+    });
+    await loadCases();
+    await openCase(id);
+  } catch (e) {
+    showError("审批失败：" + e.message);
+  }
+}
+
+$("newAudit").onclick = async () => {
+  const id = $("scenario").value;
+  if (!id) return;
+  try {
+    showError("");
+    $("hint").textContent = "审核中…";
+    await api("/api/cases/" + encodeURIComponent(id) + "/audit", {
+      method: "POST", body: "{}",
+    });
+    await loadCases();
+    await openCase(id);
+  } catch (e) {
+    showError("审核失败：" + e.message);
+  } finally {
+    $("hint").textContent = "";
+  }
+};
+$("refresh").onclick = loadCases;
+
+(async function init() {
+  try {
+    await loadScenarios();
+    await loadCases();
+  } catch (e) {
+    showError("初始化失败：" + e.message);
+  }
+})();
+</script>
+</body>
+</html>

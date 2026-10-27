@@ -16,7 +16,9 @@ sys.path.insert(0, ROOT)
 
 from data.synth.generator import build_case          # noqa: E402
 from data.synth.scenarios import CASES               # noqa: E402
+from src.adapters.llm_mock import MockLLM            # noqa: E402
 from src.engine import audit                         # noqa: E402
+from src.harness.cost import CostMeter               # noqa: E402
 from src.harness.loop import AuditLoop               # noqa: E402
 from src.harness.tracing import MemoryTracer         # noqa: E402
 from src.tools.audit_tools import build_registry     # noqa: E402
@@ -39,6 +41,34 @@ def citation_check() -> dict:
                             "rules": [i["rule_id"] for i in no_cite]})
     return {"total": total, "missing": missing,
             "coverage": 1 - len(missing) / total if total else 1.0}
+
+
+def agent_metrics() -> dict:
+    """跑一遍完整 Agent 链路，统计步数、P95 延迟与单票成本。"""
+    meter = CostMeter()
+    rows = []
+    for case in CASES:
+        built = build_case(case)
+        t0 = time.perf_counter()
+        res = AuditLoop(build_registry(built["docs"]), MemoryTracer(), MockLLM(),
+                        cost_meter=meter).run(built["case_id"])
+        rows.append({"id": built["case_id"],
+                     "ms": (time.perf_counter() - t0) * 1000,
+                     "steps": len(res.steps), "cost": res.cost,
+                     "degraded": res.degraded})
+    n = len(rows) or 1
+    sorted_ms = sorted(r["ms"] for r in rows)
+    p95 = sorted_ms[min(len(sorted_ms) - 1, int(round(0.95 * (len(sorted_ms) - 1))))]
+    return {
+        "rows": rows,
+        "avg_steps": sum(r["steps"] for r in rows) / n,
+        "avg_ms": sum(r["ms"] for r in rows) / n,
+        "p95_ms": p95,
+        "per_case_cost": round(sum(r["cost"] for r in rows) / n, 6),
+        "total_cost": round(sum(r["cost"] for r in rows), 6),
+        "degraded": sum(bool(r["degraded"]) for r in rows),
+        "meter": meter.summary(),
+    }
 
 
 def evaluate():
@@ -80,11 +110,15 @@ def evaluate():
     covered = [r for r in rows if not r["requires"]]
     covered_acc = (sum(r["verdict_ok"] for r in covered) / len(covered)) if covered else 1.0
     from src.engine import RULES
+    from collections import Counter
     cite = citation_check()
+    agent = agent_metrics()
     return {
         "cases": rows, "n": n, "accuracy": acc, "recall": recall,
         "covered_n": len(covered), "covered_accuracy": covered_acc,
-        "rules_total": len(RULES), "citation": cite,
+        "rules_total": len(RULES),
+        "rules_by_layer": dict(sorted(Counter(r["layer"] for r in RULES).items())),
+        "citation": cite, "agent": agent,
         "false_positives": fp, "false_positive_case_rate": fp_rate,
         "elapsed_s": elapsed,
     }
@@ -104,12 +138,21 @@ def render(result) -> str:
     lines.append(f"- 缺陷召回率：**{result['recall']:.1%}**")
     lines.append(f"- 误报用例率：**{result['false_positive_case_rate']:.1%}**"
                  f"（误报 {result['false_positives']} 处）")
-    lines.append(f"- 已实现规则：{result['rules_total']} 条（L1 10 / L2 12 / L3 10 / L4 12）")
+    layer_dist = " / ".join(f"{k} {v}" for k, v in
+                            (result.get("rules_by_layer") or {}).items())
+    lines.append(f"- 已实现规则：{result['rules_total']} 条（{layer_dist}）")
     lines.append(f"- 引用覆盖率（非 PASS 的高危问题）：**{result['citation']['coverage']:.1%}**"
                  f"（{result['citation']['total']} 条用例）")
-    lines.append(f"- 耗时：{result['elapsed_s']:.2f}s")
+    agent = result.get("agent") or {}
+    if agent:
+        lines.append(f"- 平均步数（Agent 全链路）：**{agent['avg_steps']:.1f}** 步")
+        lines.append(f"- 单票延迟：平均 {agent['avg_ms']:.1f} ms，P95 **{agent['p95_ms']:.1f} ms**")
+        lines.append(f"- 单票成本：**¥{agent['per_case_cost']:.4f}**"
+                     f"（60 条合计 ¥{agent['total_cost']:.4f}，mock 模型按可配置单价折算）")
+    lines.append(f"- 耗时（规则评测 + 引用检查）：{result['elapsed_s']:.2f}s")
     lines.append("\n> 注：60 条用例的期望值由规则推导 + 自拟内审 SOP 得出，未经报关员标注；"
-                 "容差阈值属假设，详见 `docs/02` 第 5 节。\n")
+                 "容差阈值属假设，详见 `docs/02` 第 5 节。成本单价见 "
+                 "`src/harness/cost.py`，真实模型请按账单调整。\n")
 
     lines.append("## 分类别准确率\n")
     lines.append("| 期望结论 | 用例数 | 判定正确 | 准确率 |")
@@ -145,6 +188,10 @@ def render(result) -> str:
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     result = evaluate()
     out_dir = os.path.join(ROOT, "evals", "report")
     os.makedirs(out_dir, exist_ok=True)

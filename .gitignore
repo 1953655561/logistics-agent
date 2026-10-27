@@ -3,3 +3,15 @@ __pycache__/
 .venv/
 var/
 evals/report/result.json
+evals/report/baseline.json
+evals/report/async.json
+evals/report/vectors.json
+evals/report/retrieval.json
+evals/report/modes.json
+evals/report/shadow.json
+evals/report/hallucination.json
+evals/report/perf.json
+evals/report/redteam.json
+web/node_modules/
+web/dist/
+web/openapi.json

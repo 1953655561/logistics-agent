@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import date
 
 # ---- 容差（v1.1，属"假设"参数，见 docs/02 第 5 节）----
 WEIGHT_TOL = 0.03
@@ -37,6 +38,20 @@ def within(a, b, tol) -> bool:
 
 def money(x) -> float:
     return round(num(x), 2)
+
+
+def parse_date(s):
+    """解析 YYYY-MM-DD；空值或不可解析返回 None。
+
+    调用方据此区分"字段缺失"（不报）与"字段有值但格式非法"（要报）——
+    v1.5 之前两者都返回 None，导致脏日期被静默放行。
+    """
+    if s is None or str(s).strip() == "":
+        return None
+    try:
+        return date.fromisoformat(str(s).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def get(obj, path, default=None):
@@ -103,6 +118,9 @@ def normalize_name(s) -> list[str]:
         t = t.strip()
         if not t or t.isdigit():
             continue
+        # 英文复数归一：PARTS/TOYS -> PART/TOY，避免中英混写时 jaccard 被稀释
+        if t.isascii() and len(t) > 3 and t.endswith("s") and not t.endswith("ss"):
+            t = t[:-1]
         tokens.append(t)
     return tokens
 
@@ -115,21 +133,52 @@ def name_match(a, b) -> bool:
     if not inter:
         return False
     jaccard = len(inter) / len(ta | tb)
-    return jaccard >= 0.5 or ta <= tb or tb <= ta
+    # 0.5 会让“塑料制具配件 vs 塑料制玩具配件”这种一词之差的品名通过，
+    # 评测里没有依赖 0.5 的边界用例，因此收紧到严格大于 0.5。
+    return jaccard > 0.5 or ta <= tb or tb <= ta
+
+
+# 公司名里的法律形式词，比对双方时忽略，避免 LTD/LIMITED 之类误报。
+_LEGAL_TOKENS = {"co", "ltd", "limited", "pte", "inc", "corp", "company", "llc", "gmbh"}
+
+
+def party_match(a, b) -> bool:
+    """交易双方名称比对：归一化后忽略法律形式词，其余 token 必须完全一致。
+
+    比 name_match 严格：能抓住“GLOBAL TOYS vs GLOBAL TOS”这种一字之差，
+    同时放过 LTD/LIMITED 这类写法差异。
+    """
+    ta = {t for t in normalize_name(a) if t not in _LEGAL_TOKENS}
+    tb = {t for t in normalize_name(b) if t not in _LEGAL_TOKENS}
+    if not ta or not tb:
+        return False
+    return ta == tb
 
 
 # ---- 单位归一化 ----
 _UNIT = {
     "kg": "kg", "千克": "kg", "公斤": "kg", "kgs": "kg",
     "g": "g", "克": "g",
-    "t": "t", "吨": "t",
-    "pcs": "pcs", "pc": "pcs", "个": "pcs", "只": "pcs", "件": "pcs",
-    "set": "set", "套": "set",
-    "m": "m", "米": "m",
-    "m2": "m2", "平方米": "m2",
-    "m3": "m3", "立方米": "m3", "方": "m3",
-    "l": "l", "升": "l", "ml": "ml",
-    "箱": "ctn", "ctn": "ctn", "carton": "ctn",
+    "t": "t", "吨": "t", "mt": "t", "mts": "t",
+    "pcs": "pcs", "pc": "pcs", "pce": "pcs", "piece": "pcs", "pieces": "pcs",
+    "个": "pcs", "只": "pcs", "件": "pcs", "枚": "pcs", "颗": "pcs", "粒": "pcs",
+    "set": "set", "sets": "set", "套": "set", "组": "set", "台": "set",
+    "m": "m", "米": "m", "码": "m", "yard": "m", "yd": "m",
+    "m2": "m2", "平方米": "m2", "sqm": "m2",
+    "m3": "m3", "立方米": "m3", "方": "m3", "cbm": "m3",
+    "l": "l", "升": "l", "ml": "ml", "毫升": "ml",
+    "箱": "ctn", "ctn": "ctn", "carton": "ctn", "cartons": "ctn",
+    "包": "pkg", "袋": "pkg", "pkg": "pkg", "package": "pkg",
+    "张": "sheet", "片": "sheet", "sheet": "sheet",
+    "条": "strip", "根": "strip", "支": "strip", "strip": "strip",
+    "卷": "roll", "roll": "roll", "rolls": "roll",
+    "桶": "drum", "drum": "drum", "桶装": "drum",
+    "瓶": "bottle", "bottle": "bottle", "罐": "can", "can": "can",
+    "盒": "box", "box": "box", "boxes": "box",
+    "打": "dozen", "dozen": "dozen", "双": "pair", "对": "pair", "pair": "pair",
+    "辆": "unit", "艘": "unit", "架": "unit", "unit": "unit",
+    "磅": "lb", "lb": "lb", "lbs": "lb",
+    "盎司": "oz", "oz": "oz", "加仑": "gal", "gal": "gal",
 }
 
 
@@ -137,3 +186,13 @@ def norm_unit(u) -> str:
     if not u:
         return ""
     return _UNIT.get(str(u).strip().lower(), str(u).strip().lower())
+
+
+def unit_ok(u) -> bool:
+    """计量单位是否在已知单位表内。
+
+    用于识别"个f""千克d"这类录入污染：这些值不是任何已知单位的别名。
+    """
+    if not u:
+        return False
+    return str(u).strip().lower() in _UNIT

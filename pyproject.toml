@@ -1,0 +1,23 @@
+[project]
+name = "logistics-agent"
+version = "0.1.0"
+description = "关务智能审核 Agent（进口一般贸易单证）"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+web = [
+  "fastapi==0.115.5",
+  "uvicorn==0.32.0",
+  "pydantic==2.9.2",
+]
+dev = [
+  "fastapi==0.115.5",
+  "uvicorn==0.32.0",
+  "pydantic==2.9.2",
+  "httpx==0.27.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

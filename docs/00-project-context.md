@@ -1,6 +1,6 @@
 # 00 · 项目上下文（交接必读）
 
-> 最后更新：2026-10-26 ｜ 状态：W4 完成，W4.5 待启动
+> 最后更新：2026-10-26 ｜ 状态：W6 完成（Docker / CI / 手册 / 演示脚本 / 面试卡已交付）
 > 这份文档是「给下一个会话看的」。读完它，你应该能直接接着干，不需要再问用户背景。
 
 ---
@@ -79,7 +79,7 @@
                                                    └─► LLM(仅 L3-25/26/29)
 ```
 
-**Harness 七件套**：Loop（步数预算 8）｜Router（规则优先，LLM 兜底）｜工具注册（JSON Schema + 超时 + 重试）｜记忆（单票工作记忆 + 会话记忆）｜状态（审核单状态机持久化，审批中断可续跑）｜护栏（只读输入、结论带引用、输出 schema 校验）｜Tracing（JSONL，每步的输入/耗时/token/成本）。
+**Harness 八件套**：Loop（步数预算 8）｜Router（规则优先，LLM 兜底）｜工具注册（JSON Schema + 超时 + 重试；W4.5 补 MCP）｜记忆（单票工作记忆 + 会话记忆）｜状态（审核单状态机持久化，审批中断可续跑）｜护栏（只读输入、结论带引用、输出 schema 校验、注入防护）｜Tracing（JSONL，每步的输入/耗时/token/成本）｜成本·限流·幂等（W4.5）。
 
 **关键取舍（面试要讲的三条）**
 1. 字段比对**不让 LLM 做**——确定性规则更准、更便宜、可解释。
@@ -92,16 +92,25 @@
 logistics-agent/
 ├─ AGENTS.md
 ├─ README.md
-├─ docs/            00 上下文 / 01 规则库 / 02 评测规范 / 03 架构 / 04 使用手册(D10)
+├─ docs/            00 上下文 / 01 规则库 / 02 评测规范 / 03 架构 / 04 使用手册 / 05 演示脚本 / 06 面试问答
 ├─ src/
 │  ├─ harness/      loop.py router.py tools.py memory.py state.py guardrails.py approval.py tracing.py
+│  │                cost.py ratelimit.py
+│  ├─ agents/       reviewer.py（独立复核 Agent）
+│  ├─ mcp/          server.py（stdio JSON-RPC）
 │  ├─ rules/        l1_format.py l2_consistency.py l3_elements.py l4_compliance.py
 │  ├─ rag/          index.py bm25.py vector.py rerank.py cite.py
 │  ├─ domain/       单证模型、品名归一化、单位换算、HS 相似库
 │  ├─ tools/        审核工具集（doc.get / diff.compare / rule.search / element.check / hs.suggest / cert.check / case.create / human.approve）
-│  └─ app/          CLI + FastAPI(可选外壳) + web/
+│  ├─ application/  audit_case.py web_api.py（用例编排 / Web 应用服务）
+│  ├─ adapters/     sqlite_repo.py llm_*.py fastapi_api.py
+│  └─ app/          cli.py api.py fallback_server.py
+├─ web/             AntD 审核台（src/）+ 无构建页（fallback/）+ 构建产物（dist/）
 ├─ data/            synth/（生成器与 60 票样例）、rules/（规则库 yaml/md）
-├─ evals/           cases/（60 条）、runner.py、report/
+├─ evals/           runner.py、review_compare.py、judge.py、redteam.py、perf.py、report/
+├─ scripts/         demo.py（一键演示）、gate.py（指标门禁）
+├─ .github/         workflows/ci.yml
+├─ Dockerfile · docker-compose.yml · requirements-web.txt · requirements-dev.txt
 └─ tests/
 ```
 
@@ -110,7 +119,7 @@ logistics-agent/
 - **L1/L2/L4 全部确定性规则**，不花 token；只有 L3 的品名-编码冲突、规格矛盾、归类建议用 LLM。
 - **漏报比误报致命**：结论分级宁可疑不可放；但为避免业务方弃用，用「PASS 用例防误报」压住误报率。
 - 每条规则必须有：编号、判定逻辑、违反时结论、来源（填制规范 / 税则 / 内审 SOP）。
-- 44 条已定稿，见 `01-rule-library.md`。
+- 44 条定稿后按单证复查扩到 **46 条**（v1.5 补实现、v1.6 新增 L2-23/L2-24），见 `01-rule-library.md`。
 
 ## 9. 评测设计要点
 
@@ -127,9 +136,15 @@ logistics-agent/
 | W2 | 数据生成器 + 解析/比对引擎（确定性部分） | ✅ 完成：34 条规则跑通，60 条用例可复现，覆盖内准确率 100%，误报 0 |
 | W3 | Harness + 工具层 + 审批状态机 | ✅ 完成：端口-适配器拆分、工具校验/超时/重试、六态状态机、CLI 全流程、37 条测试 |
 | W4 | RAG + 归类建议 + 引用链（L3） | ✅ 完成：44 条规则全实现，RAG 混合检索 64 chunk，准确率/召回 100%，引用覆盖 100% |
-| **W4.5** | **补洞包**：多 Agent 复核 · MCP · 红队与注入防护 · LLM-as-Judge · 成本/限流/幂等 | ⬜ |
-| W5 | Web 审核台（AntD）+ 评测调优 | ⬜ |
-| W6 | Docker、CI、文档、演示脚本、面试问答卡 | ⬜ |
+| **W4.5** | **补洞包**：多 Agent 复核 · MCP · 红队与注入防护 · LLM-as-Judge · 成本/限流/幂等 | ✅ 完成：5 项全交付，120 条测试全绿 |
+| W5 | Web 审核台（AntD）+ 评测调优 | ✅ 完成：FastAPI + WebApi + AntD 审核台 + 无构建兜底页 + 性能评测；143 条测试 |
+| W6 | Docker、CI、文档、演示脚本、面试问答卡 | ✅ 完成：多阶段镜像 + compose + GitHub Actions + 指标门禁 + 使用手册/演示脚本/面试卡 |
+
+**W5 实测**：`make test` → **143 条全绿**；`make perf` → 并发 10 的 P95 约 **80ms**、单票成本 **¥0.0002**；
+`make demo` 不装任何 Web 依赖即可起兜底审核台。
+
+**W6 实测**：`docker build` 通过；容器 `/api/health`、`/`、审核接口均正常；CI 等价命令
+`make ci`（test + eval + gate）本地可跑通；`make gate` 9 项指标全部通过。
 
 ## 11. 验收记录（2026-10-26，业务视角）
 
@@ -157,7 +172,7 @@ logistics-agent/
 2. **境内目的地不是国别**：`L1-10` 原先拿 `destination` 去匹配国别表，导致所有正常单据误报。已改为只校验启运国。
 3. 这两条都是**评测跑出来的**，不是审出来的——说明先写评测再写代码是对的。
 
-## 12. 下一步（W4.5 补洞包）
+## 12. 里程碑交付记录（W4.5 / W5 / W6）
 
 **W4 已交付**（2026-10-26）：
 
@@ -187,7 +202,7 @@ logistics-agent/
 
 **H1 多 Agent 复核**（对应 JD“单/多智能体”）
 - 新增 `src/agents/reviewer.py`：独立上下文，只看 `verdict + issues + citations`，输出 `{agree, doubts[], reason}`。
-- 主链路（现 loop）与复核链路的冲突处理：复核存疑 → 结论升为 `REVIEW`，不覆盖原问题列表。
+- 主链路（现 loop）与复核链路的冲突处理：复核存疑 → 结论升为 `REVIEW`（原 `REJECT` 则降为 `REVIEW`，由人决定是否退回），不覆盖原问题列表。
 - 对照实验：60 条用例跑“单链路 / 双链路”两遍，报告 **复核推翻率** 与 **误报变化**。
 - 验收：至少 3 条用例上复核指出主链路过判；误报不上升；有测试覆盖“复核推翻”路径。
 
@@ -215,6 +230,177 @@ logistics-agent/
 
 **W4.5 完成判据**：`make test` 全绿（≥ 55 条），`make eval` 与复核对照报告齐全，
 第 16 节覆盖度从 72% 提到 85% 以上。
+
+### W4.5 交付记录（2026-10-26）
+
+| 项 | 交付物 | 验收结果 |
+|---|---|---|
+| **H1 多 Agent 复核** | `src/agents/reviewer.py`、`evals/review_compare.py` | 60 条对照：复核异议 5 条（重复上报 3 + 仅凭关键词判禁限 2），过判观察 **5 ≥ 3**；误报 0 → 0；结论准确率 100% → 100%；单测覆盖升级/降级两条推翻路径 |
+| **H2 MCP** | `src/mcp/server.py` | `initialize` / `tools/list` / `tools/call`；5 个工具复用现有 schema；stdio 管道集成测试通过 |
+| **H3 红队** | `src/harness/guardrails.py`、`data/synth/redteam.py`、`evals/redteam.py` | **10/10** 拦截或降级；`auto_change_hs` **0 次**；工具白名单 + 输出 schema 校验 |
+| **H4 LLM-as-Judge** | `evals/judge.py` | 与人工期望一致率 **100%**（验收线 ≥ 80%）；不一致清单为空；rubric 与 LLM 两条路径同构 |
+| **H5 成本/限流/幂等** | `src/harness/cost.py`、`src/harness/ratelimit.py`、`CaseService.submit()` | 单票成本 **¥0.0002**（mock）；超限降级 REVIEW 并写 trace；重复提交仅 **1** 条记录、成本不变 |
+
+**W4.5 实测**：`make test` → **120 条全绿**；`make eval` 生成
+`evals/report/report.md` / `review.md` / `judge.md` / `redteam.md`；
+主评测仍 **100% / 100% / 0 / 100%**；60 条平均 3.7 步、P95 约 4ms。
+
+**与原始设计的偏差（如实记录，面试可讲）**：
+
+1. **复核对“过判观察”只标记、不改判**：只有阻断性疑问（证据缺口、未知规则号、结论与问题不匹配）
+   才调整结论；重复上报、仅凭关键词判禁限属于“观察”，不覆盖问题列表，避免破坏可追溯性。
+   因此 60 条回归集上“结论推翻率 = 0”，但升级/降级两条路径都有单测覆盖。
+2. **限流只作用于 LLM 调用**：确定性工具是本地纯函数，不是外部依赖；`make eval` 批处理默认
+   关闭限流，避免 60 条回放被“60 次/分钟”误伤。真实在线部署时在 `CaseService` 注入即可。
+3. **Judge 默认走确定性 rubric**：零 token、可复现；接真实模型时可切 LLM 打分，报告标注 `method`。
+4. **复核 LLM 在 mock 模型下自动跳过**：避免 mock 的桩输出（布尔全 False）污染结论。
+
+### W5 Web 审核台与评测调优（2026-10-26）
+
+| 项 | 交付物 | 验收结果 |
+|---|---|---|
+| **Web API** | `src/application/web_api.py`、`src/adapters/fastapi_api.py`、`src/app/api.py`、`src/app/wiring.py` | 列表/详情/单证/trace/审核/审批/指标接口；OpenAPI 自动导出并生成前端类型 |
+| **无构建兜底** | `src/app/fallback_server.py`、`web/fallback/index.html` | 不装 fastapi/Node 也能起；静态审核台 + 同一套 JSON API |
+| **AntD 审核台** | `web/`（AntD 5 + React 18 + TS + Vite + TanStack Query） | 列表、详情、问题清单、五单证、处理轨迹、复核与护栏、审批 Drawer、评测指标；`pnpm build` 通过 |
+| **评测调优** | `evals/perf.py` | 串行/并发 10 两套指标；P95 ≤ 5s、单票成本 ≤ ¥0.1、0 错误 |
+| **工程修正** | `SqliteRepo` 加跨线程锁；OpenAPI → TS 类型 | SQLite 可在 FastAPI 线程池/兜底服务复用；143 条测试（W5 时点） |
+
+**W5 实测**：AntD 构建产物 1.09MB（gzip 342KB）；并发 10 的 P95 约 80ms（mock，单进程）。
+**面试讲法**：先讲“审批门在工具层，CLI 与 Web 复用同一套状态机”，再讲“前端只消费带引用的结论、不做业务判断”，
+最后讲“兜底页保证客户现场没 Node 也能演示”。
+
+### W6 Docker / CI / 文档 / 演示 / 面试卡（2026-10-26）
+
+| 项 | 交付物 | 验收结果 |
+|---|---|---|
+| **Docker** | `Dockerfile`（node 构建 AntD → python 运行时）、`docker-compose.yml` | 本地构建通过；容器 `/api/health`、`/`、审核接口正常；非 root + healthcheck |
+| **CI** | `.github/workflows/ci.yml` | 三条 job：Python 测试+评测+门禁、AntD 类型生成+构建、Docker 构建 |
+| **指标门禁** | `scripts/gate.py`、`Makefile gate` | 9 项：准确率/召回/误报/引用/成本/P95/错误/红队/`auto_change_hs` |
+| **演示** | `scripts/demo.py`、`Makefile demo-script` | 四结论代表用例一键跑，输出问题/引用/成本/轨迹 |
+| **文档** | `docs/04` 使用手册（含反馈闭环）、`docs/05` 演示脚本、`docs/06` 面试问答卡 | D10 交付；含 10 分钟演示与 27 题问答 |
+| **工程** | `requirements-web.txt`、`requirements-dev.txt`、`pyproject.toml`、`.dockerignore` | 依赖可复现；`.dockerignore` 控制上下文 |
+
+**W6 实测**：`docker build` 成功；容器健康检查与审核接口通过；`make gate` **9/9**；
+`make ci`（test + eval + gate）本地等价命令通过；测试 **155 条**。
+
+**局限（如实记录）**：CI workflow 未在真实 GitHub Runner 上跑过，只做了本地等价命令；
+Docker 首次构建需要能拉取基础镜像与依赖。
+
+### W6.1 单证导入（2026-10-26）
+
+| 项 | 交付物 | 验收结果 |
+|---|---|---|
+| **API** | `POST /api/cases/import`（`src/application/web_api.py`） | 结构校验、`sanitize_docs`、自动编号、落盘 `var/docs/{case_id}.json` |
+| **Web** | `web/src/components/ImportCaseModal.tsx` | 粘贴 / 上传 `.json` / 载入示例；实时解析预览；导入后进详情 |
+| **示例** | `examples/docs.example.json`、`examples/README.md` | 五份合成单证，可直接上传 |
+| **真实感样例** | `examples/realistic/`（5 票 + `build.py`） | 字段参照海关总署填制规范 + UPS 发票指南；覆盖 PASS/FIX/REVIEW/REJECT |
+| **测试** | `test_web_api` / `test_fastapi_api` / `test_fallback_server` / `test_examples` / `test_rules` | 导入 6 + 样例 2 + 规则补强 4，**155 条全绿** |
+
+**实测**：审核台「导入单证」→ 载入示例 → 导入为 `CUSTOM-001`，结论 `FIX`，
+问题 `L2-13`，详情页可回看五份单证；缺单证导入会按 `REVIEW` 处理。
+
+### W6.2 规则补强（用户测试驱动，2026-10-26）
+
+用户手改 `REAL-001` 造了 8 处纰漏，系统起初只报 2 处；排查后确认一是旧服务未重启，
+二是两条真实漏报。已修：
+
+| 规则 | 修正 | 效果 |
+|---|---|---|
+| **L2-11** | jaccard 从 `>= 0.5` 收紧到 `> 0.5`；英文复数归一（PARTS→PART） | 能识别“塑料制具配件 vs 塑料制玩具配件”一词之差 |
+| **L2-18** | 新增合同买方/发票买方、发票卖方/提单发货人、提单通知人校验；`party_match` 忽略 LTD/LIMITED/PTE | 能识别 `GLOBAL TOYS` vs `GLOBAL TOS`、`进口` vs `进出口` |
+
+同一份手改文件现在报 **7 条**：`L2-11` × 2、`L2-18` × 4、`L2-21` × 1；
+其余 3 处（合同 terms 拼写、箱单号、报关单类型文本）属于规则库不覆盖的自由文本，不是漏报。
+回归：60 条准确率/召回/误报/引用覆盖仍为 100% / 100% / 0 / 100%，**155 条测试全绿**。
+
+### W6.3 单证复查驱动的规则补洞（2026-10-26）
+
+用户上传手改的 `REAL-002`（相对原样例 53 处字段污染），系统报 **13 条**。逐字段单点注入复核后确认：
+13 条**无误报**，但 53 处里只有 19 处能被单点抓住，34 处抓不到 —— 其中 7 处是"规则写了没实现"，
+7 处是"脏数据导致校验静默跳过"，12 处属规则库空白，8 处是自由文本（与 W6.2 口径一致）。已修：
+
+| 规则 | 修正 | 效果 |
+|---|---|---|
+| **L1-02 / L4-42** | 脏日期不再静默跳过 | 发票/箱单/到港日格式非法各报 1 条；期限无法核定单独报，不再直接 PASS |
+| **L1-10** | HS 扩到四单；补单号字符集 | 发票 `9503008g900`、箱单 `9503008v900` 报出 |
+| **L1-04** | 补第二法定单位 + 单位合法性 | 发票 `个f` / `千克d` 报出 |
+| **L2-19** | 成交方式先判合法性 + 四单一致 | `OB` / `FOpB` / `FOsB` 不再从三个分支滑过 |
+| **L2-21** | 补发票合同号比对 | 发票 `HT-202-0901` vs 合同 `HT-206-0901` 报出 |
+| **L4-35** | 代码表查不到要报 | `一般d贸易` 不再静默 |
+| **L1-03** | 币制表扩全量 ISO 4217，校验扩到合同/发票 | 合同 `US` 报非法代码 |
+
+同一份文件：**13 → 25 条**；60 条回归集仍 **100% / 100% / 0 / 100%**；测试 155 → **166 条**全绿；
+`make gate` **9/9**。新增单测见 `tests/test_rules.py::TestW63RuleFixes`（11 条）。
+
+**未覆盖（如实记录）**：装货港一致、单号数字位笔误、运输方式/包装种类/关区等代码表字段。
+另：复核 Agent 的"同一规则多次上报即过判"判据偏粗（本票 L2-11×3、L2-18×4 都是不同单证对，
+不是重复），应改为按"规则 + 证据对"分组——已记为待办，v1.6 暂未改动。
+
+### W6.4 规则库扩展（v1.6，2026-10-26）
+
+承接 W6.3 的 "规则库空白" 清单，新增两条、补齐三条口径：
+
+| 项 | 交付 | 效果 |
+|---|---|---|
+| **L2-23 合同金额勾稽（新增）** | 合同总额 vs 发票总额，容差 1% | 本票 `1000 vs 10000`（差 10 倍）报出；分批/溢短装不误报 |
+| **L2-24 要素跨单一致（新增）** | 发票/报关单 `brand_type/material/use` 三键，双方都有值才比 | 本票 `无品g牌 vs 无品牌`、`儿童玩h具 vs 儿童玩具` 报出；REAL-001 手改版的 `料 vs 塑料` 也报出（原来 7 条 → 8 条） |
+| **L2-18 补卖方链** | 合同卖方 vs 发票卖方 | 本票 `GLOBAL TOYS PTE LTD vs GLOBAL TYS PTE LTD` 报出 |
+| **L2-11 扩英文品名** | 中文一致而英文不一致出 low，不改结论 | 多商品项按中文名配对（IMP-0016 曾因此误报，已修） |
+| **四单口径** | L2-12 加提单、L2-15 加报关单、L2-16 加提单、L1-07 加报关单行勾稽 | 散装货按 3% 放宽（IMP-0008 一度误报，已修） |
+
+**实测**：规则 44 → **46 条**（L1 10 / L2 14 / L3 10 / L4 12）；60 条回归集 **100% / 100% / 0 / 100%**；
+测试 **179 条**全绿；`make gate` **9/9**；同一份手改 REAL-002：13 → **29 条**；
+53 处字段污染里单点可抓 **37 处**（v1.5 前只有 19 处）。
+
+**顺带修的隐性缺陷**：`src/tools/audit_tools.py` 的 `rules.audit` 把问题清单硬编码截断到 **20 条**，
+审核单只落库前 20 条 —— 本票 29 条在 Web/CLI 上显示成 20 条。已去掉截断（上下文预算由
+`harness/loop.py::_summarize` 只取前 5 条进 LLM 控制），并加回归测试
+`test_tool_result_is_not_truncated`。教训：**评测跑的是 `engine.audit`，而线上走的是工具链路，
+两条链路必须一起测**。
+
+**口径变化（如实记录）**：P95 从约 80ms 升到约 180ms（规则变多，mock 单进程）；
+复核"过判观察"从 5 条升到 6 条——原因是 L1-07 现在能对同一票同时报发票行与报关单行，
+复核的 `repeat_rule` 仍按"规则条数"计，属该判据的噪声（与 W6.3 记录的同一问题）。
+
+**仍待办（v1.7）**：装货港一致（提单 POL vs 报关单装货港）、代码表字段（运输方式/包装种类/关区/证件号格式）、
+复核 `repeat_rule` 判据改为按证据对分组。
+
+### W6.5 岗位对标补强：P0–P6（2026-10-27）
+
+背景：按「智能体开发工程师」岗位需求单做覆盖度评估（`var/job-fit-AI-Agent-Engineer.md`），
+加权覆盖 **63.8%**；据此排了 P0–P6 计划（`var/plan-to-80.md`，目标 82.2%），本次全部执行完。
+
+| 阶段 | 交付 | 实测 |
+|---|---|---|
+| **P0 基线固盘** | `scripts/baseline.py` / `baseline_check.py` / `baseline_lib.py`；`make baseline`、`make baseline-check`；门禁阈值单源化到 `gate.checks()` | 一条命令冻结/比对，退化即 exit 1 |
+| **P1 路由/记忆/规划器/追问** | `harness/router.py`（cheap/strong，离线退化 mock）、`harness/memory.py`（scratchpad + 主体历史，TTL/budget）、`harness/planner.py` + `loop.py` 的 `mode=scripted/react`、`POST /api/cases/{id}/ask`、UI「为什么？」与历史提示条 | `evals/modes.py`：结论一致率 **100%**，步数 3.7 → 4.4，证据覆盖 **28.3%**；追问 4 类意图全部带证据或明确拒答 |
+| **P2 检索可评测 + 增量索引** | `evals/retrieval.py`（30 条口语 query）、同义词表 + 判断类先验、`rag/store.py` 指纹 diff、`python -m src.rag.reindex` | recall@1 **93.3%**、recall@3 **100%**、MRR **0.961**；二次 reindex `changed=0` |
+| **P3 观测补强** | `evals/hallucination.py`、`evals/shadow.py` + `evals/golden/human-labelled.json`、`scripts/alert.py`；gate 扩到 **11 项** | 无引用断言率 **0.0%**（0/44）、引用不可回查率 **0.0%**；shadow 对账 29/29、人工标注 0/29 |
+| **P4 Agent Skill** | `skills/document-audit/SKILL.md` + `harness/skills.py` 加载器（只注入 summarize 提示，不改结论）、`docs/07-templates/` 三份模板 | 删文件后行为回退；注入前后 issues/verdict 逐条一致 |
+| **P5 抽取 POC + 采用记录** | `POST /api/extract`（文本→五单 JSON + 逐字段置信度 + needs_human）、`docs/08-adoption-log.md` | 样例发票抽全 8 字段、行金额置信 1.0；采用记录 1/5（其余待真实试用） |
+| **P6 向量表 + 异步** | `rag/vectors.py`（sqlite 向量表 + provider 可插拔）、`evals/vectors.py`、API 全改 `async def` + `asyncio.to_thread`、`scripts/async_bench.py` | hash 33.3%/53.3% vs sim 40%/60%（纯向量口径）；ASGI 并发 10 P95 **48.7ms**、约 283 rps |
+
+**W6.5 收尾修的四处问题（2026-10-27，用户反馈截图驱动）**：
+1. 追问答案里**无条件塞历史提示** → 改为按相关性注入（问题问历史，或提示的重复规则与被问规则有交集），
+   否则只留在详情页提示条；记忆提示也改成只保留与「交易主体」强相关的规则（L2-11/13/14/18/21/23、L1-03），
+   并列规则中文标题，不再挑三条随机的；
+2. 追问答案**同一事实讲三遍**（答案抄规则原文 + 引用区再给一遍 + 证据 JSON 重复）→ 答案只留结论/证据/建议，
+   规则原文只在引用区，证据展平成 字段 = 值；规则 evidence 只含参数（allowed/tol）时改从单证取实值；
+3. 复核 `repeat_rule` **把逐单证/逐字段误判成重复上报** → 改为「规则 + 字段 + 证据」三者都相同才算重复。
+   效果：单票 29 条问题的过判观察 **8 → 0**；60 例回归集过判观察 6 → 3，复核异议 6/60 → 3/60。
+4. `/api/health` 与页面右上角**看不出当前用什么模型**（标签写死「离线 mock」）
+   → health 增加 `model{offline,active,llm,routes,tiers}`（`WebApi.health()` + `router.describe()`），前端标签改读接口：离线绿色「离线 mock」、
+   在线蓝色「在线模型 · cheap/strong」，悬停可看路由表。
+
+**总体结果**：加权覆盖 **63.8% → 80.3%**（计划 82.2%，差 **1.9 个点全在 R5**——真实客户与采用记录补不上）。
+测试 **179 → 278** 全绿；60 例仍 **100% / 100% / 0 / 100%**；`make gate` **11/11**。
+
+**偏差与边界（如实记录）**：
+1. `uncited_rate` / `broken_citation_rate` 的 gate 阈值暂取观测值 0（"先观测后设线"），真实模型下要重设；
+2. shadow 只有对账、没有评分——29 条人工标注仍是 `unreviewed`，不伪造结论；
+3. 两个向量 provider 都不是真 embedding 模型，只能证明"可插拔 + 可对比"，不能外推成"接真模型更好"；
+4. OCR/扫描件、pgvector/Milvus、A2A/OAuth、云平台与 Secrets 明确不做，`README` 能力矩阵里标为"未实现/接口预留"；
+5. 现场采用仍是 1 条内部自测，`docs/08` 其余 4 条待补——**没有真实业务方使用，就不能写"上线"**。
 
 ## 13. 风险
 
@@ -244,7 +430,8 @@ logistics-agent/
 
 ## 15. 新会话怎么开始
 
-> 读 `AGENTS.md` → 读本文 → 看 `docs/01`、`docs/02` → 从第 12 节“下一步”接着做。
+> 读 `AGENTS.md` → 本文 → `docs/01` 规则库 → `docs/02` 评测 → `docs/03` 架构 →
+> `docs/04` 使用手册 → `docs/05` 演示脚本 → `docs/06` 面试卡。从第 12 节交付记录接着做。
 
 如果用户的口径和本文冲突，**以用户最新说法为准**，并在本文追加一条变更记录。
 
@@ -256,7 +443,7 @@ logistics-agent/
    不需要用户复述背景。
 3. 用户不熟悉关务业务，**术语必须给白话解释**（见第 14 节），不要假设他知道“完税价格”“舱单”是什么。
 
-## 16. 岗位覆盖度对照（W4.5 之后）
+## 16. 岗位覆盖度对照（W6 之后）
 
 | JD 要求 | 现在 | 补强后 | 证据（补强后） |
 |---|---|---|---|
@@ -264,15 +451,23 @@ logistics-agent/
 | 单/多智能体 | 60% | **90%** | H1 复核 Agent + 对照实验 |
 | RAG 全链路 | 85% | 85% | W4（真 embedding 仍为可插拔适配点） |
 | 评测驱动 | 75% | **95%** | H3 红队 10 条 + H4 Judge 一致率 |
-| 生产化 | 60% | **80%** | H5 成本/限流/幂等；Docker/CI 在 W6 |
-| FDE 交付 | 30% | **45%** | 《使用手册》+ 影子运营报告 + 方法论；**无真实客户，不夸大** |
-| Python/工程 | 85% | 85% | 37 测试 → 55+ 测试；FastAPI 在 W5 |
+| 生产化 | 60% | **90%** | H5 + W6：Docker 多阶段、CI、指标门禁、healthcheck |
+| FDE 交付 | 30% | **60%** | W6《使用手册》+ 反馈闭环 + 演示脚本；**无真实客户，不夸大** |
+| Python/工程 | 85% | **90%** | 155 测试；FastAPI + AntD + Docker + CI |
 | Prompt/Context、Tool Calling | 75% | 85% | H3 注入防护；H4 judge 反推 prompt 质量 |
 | 接口与安全（MCP/OAuth/注入/幂等） | 50% | **85%** | H2 + H3 + H5；OAuth 只做设计说明 |
 
-**加权：72% → 约 87%。**
+**加权：72% → 约 90%。**
 
-剩下 13% 的构成（面试时要主动承认，别等被问）：
+> W4.5 交付后按本表重算约 **87%**。可核验证据：
+> `evals/report/review.md`（复核对照）、`judge.md`（Judge 一致率）、`redteam.md`（红队 10 条）、
+> `report.md`（主评测 + 成本/延迟/步数）。
+>
+> W5 追加：FastAPI + AntD 审核台 + 无构建兜底页 + 并发性能评测（`evals/report/perf.md`）；
+> W6 追加：Docker / CI / 指标门禁 / 使用手册 / 演示脚本 / 面试卡。
+> 按本表重算约 **90%**，剩下 10% 主动承认（见下）。
+
+剩下约 10% 的构成（面试时要主动承认，别等被问）：
 - 无真实客户与驻场（FDE）；
 - 无真 embedding / 向量库（接口已留）；
 - 无 GraphRAG、多模态、A2A（可作为“我知道它们解决什么问题”的谈资）；

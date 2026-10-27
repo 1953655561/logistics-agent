@@ -1,0 +1,24 @@
+.card {
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.scenario {
+  min-width: 260px;
+  flex: 1;
+}
+
+.table :global(.ant-table-tbody > tr) {
+  transition: background 0.15s;
+}
+
+.rowActive :global(td) {
+  background: #e8efff !important;
+}

@@ -21,8 +21,11 @@ from src.adapters.llm_mock import MockLLM            # noqa: E402
 from src.adapters.llm_openai import (LLMNotConfigured,  # noqa: E402
                                      OpenAICompatLLM)
 from src.adapters.sqlite_repo import SqliteRepo      # noqa: E402
+from src.agents.reviewer import ReviewAgent          # noqa: E402
 from src.application.audit_case import CaseService   # noqa: E402
 from src.harness.approval import AutoApprover, CliApprover  # noqa: E402
+from src.harness.cost import CostMeter               # noqa: E402
+from src.harness.ratelimit import TokenBucket        # noqa: E402
 
 VAR = os.path.join(ROOT, "var")
 
@@ -51,20 +54,48 @@ def _service(args) -> CaseService:
     os.makedirs(VAR, exist_ok=True)
     repo = SqliteRepo(os.path.join(VAR, "audit.db"))
     approver = AutoApprover(approve=not args.deny) if args.auto or args.deny else CliApprover()
+    reviewer = None if getattr(args, "no_review", False) else ReviewAgent()
+    limiter = None if getattr(args, "no_ratelimit", False) else TokenBucket(60)
     return CaseService(repo, approver, llm=_get_llm(args.offline),
                        trace_dir=os.path.join(VAR, "traces"),
-                       pause_for_approval=getattr(args, "pause", False))
+                       pause_for_approval=getattr(args, "pause", False),
+                       reviewer=reviewer, cost_meter=CostMeter(),
+                       rate_limiter=limiter)
 
 
 def cmd_audit(args):
     docs = _docs_for(args.case_id, args.docs)
-    rec = _service(args).run(args.case_id, docs)
+    rec = _service(args).submit(args.case_id, docs)
     _render(rec, args.json)
 
 
 def cmd_resume(args):
     rec = _service(args).resume(args.case_id)
     _render(rec, args.json)
+
+
+def cmd_ask(args):
+    """对已有审核单追问：python -m src.app.cli ask CASE "为什么报 L2-13？" """
+    from src.app.wiring import build_web_api
+
+    web = build_web_api(offline=True)
+    try:
+        out = web.ask(args.case_id, args.question)
+    except Exception as exc:
+        raise SystemExit(f"追问失败：{exc}")
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return
+    print(f"\n问：{out['question']}")
+    print(f"答：{out['answer']}")
+    if out["evidence"]:
+        print("证据：")
+        for ev in out["evidence"]:
+            print(f"  - [{ev['rule_id']}] {ev['field_path']} {ev['evidence']}")
+    if out["citations"]:
+        ids = "、".join(c["chunk_id"] for c in out["citations"] if c.get("chunk_id"))
+        print(f"引用：{ids}")
+    print(f"置信：{out['confidence']}{'（无证据支撑）' if out['uncited'] else ''}")
 
 
 def cmd_list(args):
@@ -100,6 +131,22 @@ def _render(rec: dict, as_json: bool):
         print(f"  - [{it.get('rule_id')}] {it.get('message')}  ← {cite}")
     if p.get("summary"):
         print(f"摘要：{p['summary']}")
+    rv = p.get("review") or {}
+    if rv:
+        print(f"复核：{rv.get('recommendation', '-')} — {rv.get('reason', '')}")
+        for d in rv.get("doubts", []):
+            print(f"  · 疑问 [{d.get('code')}] {d.get('detail', '')}")
+        for o in rv.get("observations", []):
+            print(f"  · 观察 [{o.get('code')}] {o.get('detail', '')}")
+    if p.get("guard"):
+        kinds = "、".join(sorted({g.get("kind", "") for g in p["guard"]}))
+        print(f"护栏：命中 {len(p['guard'])} 条（{kinds}）")
+    if p.get("usage"):
+        u = p["usage"]
+        print(f"成本：¥{p.get('cost', 0):.6f}"
+              f"（in {u.get('input_tokens', 0)} / out {u.get('output_tokens', 0)} token）")
+    if (p.get("idempotency") or {}).get("hit"):
+        print("幂等：重复提交，返回已有审核单（未重复建单/计费）")
     steps = p.get("steps", [])
     if steps:
         print("步骤：")
@@ -124,6 +171,8 @@ def main(argv=None):
     p.add_argument("--deny", action="store_true", help="非交互：审批自动退回")
     p.add_argument("--pause", action="store_true", help="挂起在待审批，稍后用 resume 续跑")
     p.add_argument("--offline", action="store_true", help="强制离线 mock 模型")
+    p.add_argument("--no-review", action="store_true", help="关闭独立复核 Agent（单链路）")
+    p.add_argument("--no-ratelimit", action="store_true", help="关闭令牌桶限流")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_audit)
 
@@ -144,6 +193,12 @@ def main(argv=None):
     p.add_argument("case_id")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_show)
+
+    p = sub.add_parser("ask", help="对已有审核单追问（带证据与引用）")
+    p.add_argument("case_id")
+    p.add_argument("question")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_ask)
 
     args = ap.parse_args(argv)
     args.fn(args)

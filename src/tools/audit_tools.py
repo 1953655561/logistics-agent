@@ -54,8 +54,14 @@ def build_registry(docs: dict) -> ToolRegistry:
     def rules_audit(layer: str = ""):
         report = audit(docs)
         issues = [i for i in report["issues"] if (not layer or i["layer"] == layer)]
+        # 不在这里截断：审核单的问题清单要完整落库（曾硬编码 issues[:20]，
+        # 导致问题 >20 条的票在 Web/CLI 上被静默截掉后 9 条）。
+        # 上下文预算由调用方控制（harness/loop.py 的 _summarize 只取前 5 条进 LLM）。
+        by_rule: dict[str, int] = {}
+        for it in issues:
+            by_rule[it["rule_id"]] = by_rule.get(it["rule_id"], 0) + 1
         return {"verdict": report["verdict"], "issue_count": len(issues),
-                "issues": issues[:20]}
+                "by_rule": dict(sorted(by_rule.items())), "issues": issues}
 
     reg.register(Tool(
         name="rules.audit",

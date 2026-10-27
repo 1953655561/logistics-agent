@@ -1,0 +1,61 @@
+.shell {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: auto;
+  min-height: 64px;
+  padding: 10px 24px;
+  background: #0f172a;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.logoMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #1d4ed8, #0ea5e9);
+  color: #fff;
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.brand {
+  color: #fff !important;
+  margin: 0 !important;
+  font-size: 17px !important;
+}
+
+.sub {
+  color: #93c5fd;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.content {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

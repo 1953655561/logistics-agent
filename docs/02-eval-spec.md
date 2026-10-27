@@ -180,3 +180,72 @@
 | 0058 | 许可证过期 + 申报超期 | REVIEW | 双缺陷 |
 | 0059 | 金额+要素+证件+日期 | REVIEW | 四缺陷，脏数据 |
 | 0060 | 缺陷 + 单位混用 + 空值 | FIX | 脏数据 |
+
+## 7. W4.5 新增评测（2026-10-26）
+
+除主评测外，`make eval` 还会生成三份专项报告：
+
+| 报告 | 生成命令 | 指标 |
+|---|---|---|
+| `evals/report/review.md` | `make review` | 复核异议率、复核推翻率、过判观察、误报变化 |
+| `evals/report/judge.md` | `make judge` | 与期望一致率（≥80%）、平均分、不一致/扣分明细 |
+| `evals/report/redteam.md` | `make redteam` | 10 条攻击拦截率、`auto_change_hs` 出现次数 |
+
+主评测报告 `report.md` 另增：**平均步数、单票延迟（均值/P95）、单票成本**。
+成本口径：结论 token 单价见 `src/harness/cost.py`，可用
+`LOGIAGENT_PRICE_INPUT_PER_1K` / `LOGIAGENT_PRICE_OUTPUT_PER_1K` 覆盖；mock 模型下
+token 按字符估算，只用于演示与回归，报告中会标注。
+
+**W4.5 验收口径**：
+- `make test` ≥ 55 条（实际 120 条）；
+- 复核对照：过判观察 ≥ 3 条、误报不上升；
+- Judge 一致率 ≥ 80%（实际 100%）；
+- 红队 10 条全部拦截或降级，`auto_change_hs` 为 0。
+
+## 8. W5 性能评测（2026-10-26）
+
+`make perf` 生成 `evals/report/perf.md` / `perf.json`：
+
+| 场景 | 请求数 | 并发 | 指标 |
+|---|---|---|---|
+| 串行 | 60 | 1 | P50/P95/P99、最大延迟、吞吐、单票成本 |
+| 并发 | 120 | 10 | 同上 + 错误率与错误样例 |
+
+**验收口径（D7）**：P95 ≤ 5s、单票成本 ≤ ¥0.1、并发 10 无错误。
+W5 实测：串行 P95 约 5ms；并发 10 P95 约 80ms（mock、单进程内存压测），
+P95/成本/错误率三项全部通过。该数字**不代表生产环境**，生产还需叠加网络、数据库与真实模型耗时。
+
+## 9. W6 指标门禁（2026-10-26，v1.6 扩到 11 项）
+
+`make gate` 读四份 JSON（`result.json` / `perf.json` / `redteam.json` / `hallucination.json`），11 项全过才返回 0：
+
+| # | 指标 | 阈值 |
+|---|---|---|
+| 1 | 结论准确率 | ≥ 95% |
+| 2 | 缺陷召回率 | ≥ 95% |
+| 3 | 误报用例率 | ≤ 1% |
+| 4 | 引用覆盖率 | ≥ 95% |
+| 5 | 单票成本 | ≤ ¥0.1 |
+| 6 | 并发 10 P95 | ≤ 5s |
+| 7 | 性能错误数 | 0 |
+| 8 | 红队拦截 | 10/10 |
+| 9 | `auto_change_hs` | 0 |
+| 10 | 无引用断言率（`uncited_rate`） | ≤ 0%（观测值 0，先观测后设线） |
+| 11 | 引用不可回查率（`broken_citation_rate`） | ≤ 0%（观测值 0） |
+
+CI 里 `make eval && make gate`，任何指标退化都会阻止合入；`scripts/alert.py` 用同一套
+`gate.checks()`，失败时写 `var/alerts/*.json` 并可选 webhook 通知。
+
+## 10. 检索与观测评测（v1.6，2026-10-27）
+
+| 评测 | 脚本 | 指标 | 当前值 |
+|---|---|---|---|
+| 检索召回 | `evals/retrieval.py` | recall@1 / recall@3 / MRR（30 条口语化 query，不含规则编号） | 93.3% / 100% / 0.961 |
+| 向量 provider 对比 | `evals/vectors.py` | 纯向量检索下 hash vs sim 的 recall | hash 33.3%/53.3%，sim 40%/60% |
+| 无引用断言 | `evals/hallucination.py` | 高危问题缺引用的比例、引用不可回查比例 | 0.0% / 0.0%（0/44） |
+| 影子评测 | `evals/shadow.py` | 人工标注进度、与引擎结果对账 | reviewed 0/29，对账 29/29 |
+| 模式对比 | `evals/modes.py` | scripted vs react 的结论一致率、步数、证据覆盖 | 100% 一致；3.7 → 4.4 步；证据覆盖 28.3% |
+
+> 口径提醒：端到端「引用覆盖率 100%」说明引用能挂上，**不等于检索准**；
+> 检索质量看 recall@k 与 MRR。向量对比里的两个 provider 都不是真 embedding 模型，
+> 只能说明「可插拔 + 可对比」这条链路通了，不能外推成"接真模型会更好"。

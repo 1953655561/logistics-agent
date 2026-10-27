@@ -1,9 +1,7 @@
 """L4 监管与合规（12 条，确定性规则 + 名录表）。"""
 from __future__ import annotations
 
-from datetime import date
-
-from ..common import get, num
+from ..common import get, num, parse_date
 from ..domain.codes import (CERT_REQUIRED_HS6, DUAL_ANTI_HS6, FOOD_HS2,
                             PROHIBITED_HS4, PROHIBITED_KEYWORDS,
                             TRADE_MODE_EXEMPTION)
@@ -11,13 +9,6 @@ from ..issue import Issue, RuleResult
 from ..registry import rule
 
 L = "L4"
-
-
-def _d(s):
-    try:
-        return date.fromisoformat(str(s))
-    except Exception:
-        return None
 
 
 def _hs_items(ctx):
@@ -51,16 +42,22 @@ def check_agreement(ctx):
 
 @rule("L4-35", L, "贸易方式匹配", "报关单填制规范")
 def check_trade_mode(ctx):
-    mode = str(get(ctx, "declaration.trade_mode", ""))
-    nature = str(get(ctx, "declaration.exemption_nature", ""))
+    mode = str(get(ctx, "declaration.trade_mode", "")).strip()
+    nature = str(get(ctx, "declaration.exemption_nature", "")).strip()
+    issues = []
     allowed = TRADE_MODE_EXEMPTION.get(mode)
+    # 代码表查不到要报，不能当合法放行——否则脏文本会让整条规则静默通过
+    if mode and allowed is None:
+        issues.append(Issue("L4-35", "declaration.trade_mode", "mid",
+                            f"贸易方式不在代码表内：{mode}",
+                            {"allowed": sorted(TRADE_MODE_EXEMPTION)},
+                            "按填制规范代码表填写"))
     if allowed and nature and nature not in allowed:
-        return RuleResult("L4-35", L, "贸易方式匹配", "FIX",
-                          [Issue("L4-35", "declaration.exemption_nature", "high",
-                                 f"贸易方式「{mode}」与征免性质「{nature}」不匹配",
-                                 {"allowed": sorted(allowed)})],
-                          "报关单填制规范")
-    return RuleResult("L4-35", L, "贸易方式匹配", "PASS", [], "报关单填制规范")
+        issues.append(Issue("L4-35", "declaration.exemption_nature", "high",
+                            f"贸易方式「{mode}」与征免性质「{nature}」不匹配",
+                            {"allowed": sorted(allowed)}))
+    return RuleResult("L4-35", L, "贸易方式匹配", "FIX" if issues else "PASS",
+                      issues, "报关单填制规范")
 
 
 @rule("L4-36", L, "禁限类目", "禁限目录")
@@ -71,10 +68,15 @@ def check_prohibited(ctx):
         name = str(it.get("name", ""))
         if hs[:4] in PROHIBITED_HS4:
             issues.append(Issue("L4-36", f"declaration.items[{i}].hs_code", "high",
-                                f"编码 {hs} 属禁止/限制进口类目"))
-        if any(k in name for k in PROHIBITED_KEYWORDS):
-            issues.append(Issue("L4-36", f"declaration.items[{i}].name", "high",
-                                f"品名含禁限关键词：{name}"))
+                                f"编码 {hs} 属禁止/限制进口类目",
+                                {"match": "hs4", "hs4": hs[:4]}))
+        for k in sorted(PROHIBITED_KEYWORDS):
+            if k in name:
+                # 记下证据类型：仅关键词命中属于弱证据，复核 Agent 会提示人工确认
+                issues.append(Issue("L4-36", f"declaration.items[{i}].name", "high",
+                                    f"品名含禁限关键词：{name}",
+                                    {"match": "keyword", "keyword": k}))
+                break
     return RuleResult("L4-36", L, "禁限类目", "REJECT" if issues else "PASS",
                       issues, "禁限目录")
 
@@ -148,16 +150,25 @@ def check_dutiable_value(ctx):
 
 @rule("L4-42", L, "申报期限", "海关法")
 def check_deadline(ctx):
-    arrival = _d(get(ctx, "bl.arrival_date"))
-    dec = _d(get(ctx, "declaration.declare_date"))
+    raw = get(ctx, "bl.arrival_date")
+    arrival = parse_date(raw)
+    dec = parse_date(get(ctx, "declaration.declare_date"))
+    issues = []
+    # 到港日有值却解析不了：申报期限没法核定，必须报出来而不是直接 PASS
+    if raw is not None and str(raw).strip() != "" and arrival is None:
+        issues.append(Issue("L4-42", "bl.arrival_date", "mid",
+                            f"提单到港日格式非法，申报期限无法核定：{raw}",
+                            suggestion="按 YYYY-MM-DD 改正到港日后重新核定期限"))
+    overdue = False
     if arrival and dec:
         days = (dec - arrival).days
         if days > 14:
-            return RuleResult("L4-42", L, "申报期限", "REVIEW",
-                              [Issue("L4-42", "declaration.declare_date", "mid",
-                                     f"进境后 {days} 天申报，超过 14 天法定期限",
-                                     suggestion="核算滞报金")], "海关法")
-    return RuleResult("L4-42", L, "申报期限", "PASS", [], "海关法")
+            overdue = True
+            issues.append(Issue("L4-42", "declaration.declare_date", "mid",
+                                f"进境后 {days} 天申报，超过 14 天法定期限",
+                                suggestion="核算滞报金"))
+    conclusion = "REVIEW" if overdue else ("FIX" if issues else "PASS")
+    return RuleResult("L4-42", L, "申报期限", conclusion, issues, "海关法")
 
 
 @rule("L4-43", L, "木质包装", "木质包装检疫")
@@ -173,8 +184,8 @@ def check_wood(ctx):
 @rule("L4-44", L, "许可证有效期", "内审 SOP")
 def check_license(ctx):
     issues = []
-    exp = _d(get(ctx, "declaration.license_expiry"))
-    dec = _d(get(ctx, "declaration.declare_date"))
+    exp = parse_date(get(ctx, "declaration.license_expiry"))
+    dec = parse_date(get(ctx, "declaration.declare_date"))
     if exp and dec and exp < dec:
         issues.append(Issue("L4-44", "declaration.license_expiry", "high",
                             "许可证件在申报日已过期",

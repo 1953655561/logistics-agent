@@ -1,9 +1,31 @@
 """编码与名录表（小样本，够跑评测；生产环境应从海关税则/监管条件库加载）。"""
 
+# ISO 4217 现行代码（含常用记账/离岸代码）。
+# v1.5 起从 18 个常用码扩到全量：校验合同/发票币制合法性前必须先扩表，
+# 否则 SDG（苏丹镑）这类合法代码会被误判成非法。
 CURRENCIES = {
-    "USD", "EUR", "JPY", "HKD", "CNY", "CNH", "GBP", "AUD", "KRW",
-    "SGD", "CAD", "CHF", "TWD", "RUB", "THB", "MYR", "NZD", "SEK",
+    "AED", "AFN", "ALL", "AMD", "ANG", "AOA", "ARS", "AUD", "AWG", "AZN",
+    "BAM", "BBD", "BDT", "BGN", "BHD", "BIF", "BMD", "BND", "BOB", "BOV",
+    "BRL", "BSD", "BTN", "BWP", "BYN", "BZD", "CAD", "CDF", "CHE", "CHF",
+    "CHW", "CLF", "CLP", "CNY", "CNH", "COP", "COU", "CRC", "CUC", "CUP",
+    "CVE", "CZK", "DJF", "DKK", "DOP", "DZD", "EGP", "ERN", "ETB", "EUR",
+    "FJD", "FKP", "GBP", "GEL", "GHS", "GIP", "GMD", "GNF", "GTQ", "GYD",
+    "HKD", "HNL", "HRK", "HTG", "HUF", "IDR", "ILS", "INR", "IQD", "IRR",
+    "ISK", "JMD", "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KPW", "KRW",
+    "KWD", "KYD", "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD",
+    "MDL", "MGA", "MKD", "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK",
+    "MXN", "MXV", "MYR", "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD",
+    "OMR", "PAB", "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON",
+    "RSD", "RUB", "RWF", "SAR", "SBD", "SCR", "SDG", "SEK", "SGD", "SHP",
+    "SLE", "SOS", "SRD", "SSP", "STN", "SVC", "SYP", "SZL", "THB", "TJS",
+    "TMT", "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "USD",
+    "USN", "UYI", "UYU", "UYW", "UZS", "VED", "VES", "VND", "VUV", "WST",
+    "XAF", "XCD", "XOF", "XPF", "YER", "ZAR", "ZMW", "ZWL",
 }
+
+# Incoterms 2020 十一种；L2-19 只认标准 3 字代码，避免 "OB"/"FOpB" 这类脏值静默通过。
+INCOTERMS = {"EXW", "FCA", "FAS", "FOB", "CFR", "CIF",
+             "CPT", "CIP", "DAP", "DPU", "DDP"}
 
 COUNTRIES = {
     "CN", "US", "JP", "KR", "DE", "VN", "TH", "MY", "SG", "AU", "IT",

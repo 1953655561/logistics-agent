@@ -1,0 +1,180 @@
+{
+  "contract": {
+    "contract_no": "HT-2026-0901",
+    "seller": "GLOBAL TOYS PTE LTD",
+    "buyer": "宁波合成进出口有限公司",
+    "date": "2026-08-28",
+    "currency": "USD",
+    "incoterm": "CIF",
+    "total_amount": 7800.0,
+    "terms": "FOB SINGAPORE",
+    "payment": "T/T 30 days"
+  },
+  "invoice": {
+    "invoice_no": "INV-2026-0901",
+    "contract_no": "HT-2026-0901",
+    "date": "2026-09-01",
+    "seller": "GLOBAL TOYS PTE LTD",
+    "buyer": "宁波合成进出口有限公司",
+    "currency": "USD",
+    "incoterm": "CIF",
+    "items": [
+      {
+        "name": "食品研磨机",
+        "name_en": "FOOD GRINDER",
+        "hs_code": "8509400000",
+        "qty": 120,
+        "unit": "个",
+        "unit_price": 65.0,
+        "amount": 7800.0,
+        "origin": "CN",
+        "legal_unit1": "个",
+        "legal_unit2": "千克",
+        "elements": {
+          "brand_type": "境内自主品牌",
+          "material": "不锈钢",
+          "use": "家庭厨房",
+          "power": "300W"
+        },
+        "qty_legal1": 120
+      }
+    ],
+    "discount": 0.0,
+    "commission": 0.0,
+    "royalty": 0.0,
+    "total_amount": 7800.0,
+    "bulk": false,
+    "reason_for_export": "sale",
+    "terms": "FOB SINGAPORE"
+  },
+  "packing_list": {
+    "pl_no": "PL-2026-0901",
+    "date": "2026-09-01",
+    "packages": 20,
+    "package_type": "纸箱",
+    "gross_weight": 780.0,
+    "net_weight": 720.0,
+    "volume": 12.5,
+    "marks": {
+      "port": "NINGBO",
+      "text": "N/M"
+    },
+    "wood_packaging": false,
+    "ippc_mark": false,
+    "items": [
+      {
+        "name": "食品研磨机",
+        "name_en": "FOOD GRINDER",
+        "hs_code": "8509400000",
+        "qty": 120,
+        "unit": "个",
+        "unit_price": 65.0,
+        "amount": 7800.0,
+        "origin": "CN",
+        "legal_unit1": "个",
+        "legal_unit2": "千克",
+        "elements": {
+          "brand_type": "境内自主品牌",
+          "material": "不锈钢",
+          "use": "家庭厨房",
+          "power": "300W"
+        },
+        "qty_legal1": 120
+      }
+    ]
+  },
+  "bl": {
+    "bl_no": "SYN-2026-0901",
+    "date": "2026-09-03",
+    "arrival_date": "2026-09-20",
+    "vessel": "SYNTHETIC VESSEL",
+    "voyage": "V001",
+    "pol": "SINGAPORE",
+    "pod": "NINGBO",
+    "shipper": "GLOBAL TOYS PTE LTD",
+    "consignee": "宁波合成进出口有限公司",
+    "notify": "宁波合成进出口有限公司",
+    "packages": 20,
+    "gross_weight": 780.0,
+    "volume": 12.5,
+    "items": [
+      {
+        "name": "食品研磨机",
+        "name_en": "FOOD GRINDER",
+        "hs_code": "8509400000",
+        "qty": 120,
+        "unit": "个",
+        "unit_price": 65.0,
+        "amount": 7800.0,
+        "origin": "CN",
+        "legal_unit1": "个",
+        "legal_unit2": "千克",
+        "elements": {
+          "brand_type": "境内自主品牌",
+          "material": "不锈钢",
+          "use": "家庭厨房",
+          "power": "300W"
+        },
+        "qty_legal1": 120
+      }
+    ],
+    "place_of_receipt": "SINGAPORE",
+    "port_of_discharge": "NINGBO"
+  },
+  "declaration": {
+    "decl_no": "DEC-2026-0901",
+    "declare_date": "2026-09-25",
+    "consignee": "宁波合成进出口有限公司",
+    "transport_mode": "水路运输",
+    "trade_mode": "一般贸易",
+    "exemption_nature": "照章征税",
+    "origin_country": "CN",
+    "cert_origin": "CN",
+    "loading_port": "SINGAPORE",
+    "destination": "宁波",
+    "currency": "USD",
+    "incoterm": "CIF",
+    "freight": 0.0,
+    "insurance": 0.0,
+    "items": [
+      {
+        "name": "食品研磨机",
+        "name_en": "FOOD GRINDER",
+        "hs_code": "8509400000",
+        "qty": 120,
+        "unit": "个",
+        "unit_price": 65.0,
+        "amount": 7800.0,
+        "origin": "CN",
+        "legal_unit1": "个",
+        "legal_unit2": "千克",
+        "elements": {
+          "brand_type": "境内自主品牌",
+          "material": "不锈钢",
+          "use": "家庭厨房",
+          "power": "300W"
+        },
+        "qty_legal1": 120
+      }
+    ],
+    "total_amount": 7800.0,
+    "qty_total": 120,
+    "packages": 20,
+    "gross_weight": 780.0,
+    "net_weight": 720.0,
+    "contract_no": "HT-2026-0901",
+    "bl_no": "SYN-2026-0901",
+    "cert_no": "",
+    "agreement_rate": false,
+    "license_no": "",
+    "license_expiry": "",
+    "license_qty": 0,
+    "dual_anti_declared": false,
+    "overseas_reg_no": "CN-REG-0001",
+    "label_filed": true,
+    "royalty_declared": false,
+    "commission_declared": true,
+    "customs_office": "宁波海关",
+    "declaration_type": "进口货物报关单"
+  }
+}

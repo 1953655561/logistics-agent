@@ -1,0 +1,52 @@
+[
+  {
+    "file": "REAL-001-standard-toys-PASS.json",
+    "case_id": "REAL-001-standard-toys-PASS",
+    "expected": "PASS",
+    "got": "PASS",
+    "rules": [],
+    "note": "标准进口玩具：四单一致、FOB 运保费已申报、3C 证书齐全"
+  },
+  {
+    "file": "REAL-002-amount-mismatch-FIX.json",
+    "case_id": "REAL-002-amount-mismatch-FIX",
+    "expected": "FIX",
+    "got": "FIX",
+    "rules": [
+      "L2-13"
+    ],
+    "note": "报关单总价少报 0.25%（超过 0.1% 总额容差）"
+  },
+  {
+    "file": "REAL-003-missing-3c-REVIEW.json",
+    "case_id": "REAL-003-missing-3c-REVIEW",
+    "expected": "REVIEW",
+    "got": "REVIEW",
+    "rules": [
+      "L4-33"
+    ],
+    "note": "食品研磨机属 3C 品类但未申报证书号"
+  },
+  {
+    "file": "REAL-004-old-machinery-REJECT.json",
+    "case_id": "REAL-004-old-machinery-REJECT",
+    "expected": "REJECT",
+    "got": "REJECT",
+    "rules": [
+      "L4-36"
+    ],
+    "note": "品名含“旧机电”，属禁限类目"
+  },
+  {
+    "file": "REAL-005-multi-defect-REVIEW.json",
+    "case_id": "REAL-005-multi-defect-REVIEW",
+    "expected": "REVIEW",
+    "got": "REVIEW",
+    "rules": [
+      "L2-19",
+      "L2-20",
+      "L4-42"
+    ],
+    "note": "FOB 漏报运保费 + 原产国不一致 + 申报超期，按最严重项定 REVIEW"
+  }
+]
