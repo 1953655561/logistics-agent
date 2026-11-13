@@ -402,6 +402,37 @@ Docker 首次构建需要能拉取基础镜像与依赖。
 4. OCR/扫描件、pgvector/Milvus、A2A/OAuth、云平台与 Secrets 明确不做，`README` 能力矩阵里标为"未实现/接口预留"；
 5. 现场采用仍是 1 条内部自测，`docs/08` 其余 4 条待补——**没有真实业务方使用，就不能写"上线"**。
 
+### W6.6 两处「实现了但没接线」的修复（2026-10-27）
+
+背景：复核 Harness 时发现两处"有实现、有单测，但主链路没接"，属于文档比代码乐观，已修。
+
+| 处 | 原状 | 修复 | 验证 |
+|---|---|---|---|
+| **Agent Skill** | `skills.py` + `SKILL.md` + `prompt_block()` 都有，但 `skill=` **只在 tests 里传入**；`wiring.py`/`cli.py` 都没接，生产路径默认 `skill=None` | `CaseService(skill=...)` → `AuditLoop(skill=...)`；`load_default_skill()` 由 wiring/CLI 调用，`LOGIAGENT_SKILL=off` 可关；`/api/health` 增 `skill{name,enabled}` | `test_skill_block_reaches_llm_prompt` 断言系统提示里出现技能块；mock 摘要 hash `2e232dee` 与改前一致（行为零变化） |
+| **工具白名单** | `ALLOWED_TOOLS` / `tool_allowed()` 只被 `mcp/server.py` 调用；内部 `ToolRegistry.call()` 不校验 | `ToolRegistry(allowed=...)`，`build_registry()` 显式传 `ALLOWED_TOOLS`；越权调用返回 `工具不在白名单内: xxx` | `test_whitelist_rejects_tool_outside_allowlist`（塞入 `shell.exec` 被拒）+ `test_build_registry_enforces_whitelist` |
+
+**实测**：测试 **278 → 283** 全绿；`make gate` **11/11**；`baseline_check` **未发现退化**
+（`tests.total` 278→283、其余指标不变）；CLI 跑 `IMP-0043` 摘要与 idempotency 命中与改前一致。
+
+**没修的（别误以为权限补齐了）**：仍无 RBAC / 多租户 / OAuth；白名单只约束"工具名"，
+不约束参数级权限；Skill 仍只影响说明文本，不参与判定。
+
+### W7 原始数据接入（进行中，2026-11-13）
+
+用户提出：真实输入是 **Excel + 纸质扫描 PDF**，项目目前只能吃结构化 JSON。决定**先做 Excel（确定性最高）、再做 OCR**。
+
+| 已做 | 证据 |
+|---|---|
+| 类型检测 `src/ingest/detect.py` | 四类样本判对；无 `pypdf` 时用 PDF 字节特征兜底 |
+| 文字层 PDF 抽取 `src/ingest/pdf_text.py` | 五单标签表 + 明细正则 + 置信度 |
+| 端到端管线 `src/ingest/pipeline.py` | 五份 PDF → `FIX`，仅 `L2-13`（9975 vs 10000） |
+| 合成样本 | `examples/raw/`（4 个单件）+ `examples/raw/pdf/`（五单成套），生成器可复现 |
+
+实测：测试 **283 → 303**（6 条 PDF 用例需 `pypdf`，未装则 skip）；`make gate` **11/11**；`baseline_check` **未发现退化**。
+
+**未接**：Excel（`route=table`）、OCR（`route=ocr`）。实施计划与验收标准见
+**`docs/10-raw-data-ingest.md`**；新会话按该文档第 4 节开工。
+
 ## 13. 风险
 
 | 风险 | 应对 |
@@ -432,6 +463,8 @@ Docker 首次构建需要能拉取基础镜像与依赖。
 
 > 读 `AGENTS.md` → 本文 → `docs/01` 规则库 → `docs/02` 评测 → `docs/03` 架构 →
 > `docs/04` 使用手册 → `docs/05` 演示脚本 → `docs/06` 面试卡。从第 12 节交付记录接着做。
+>
+> **做原始数据接入（W7）时**：读 `docs/10-raw-data-ingest.md`，先 Excel 后 OCR。
 
 如果用户的口径和本文冲突，**以用户最新说法为准**，并在本文追加一条变更记录。
 
