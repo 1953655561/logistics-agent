@@ -8,8 +8,7 @@
 4. `README.md` —— 对外说明
 5. `docs/03-architecture.md` —— 架构、Web、Docker/CI（深入时读）
 6. `docs/04` 使用手册 · `docs/05` 演示脚本 · `docs/06` 面试问答卡（交付/面试时读）
-7. `docs/09` 岗位对标汇报（对领导/面试时读；含 JD 逐条对照与边界）
-8. `docs/10-raw-data-ingest.md` —— 原始数据接入（W7）交接与计划：**先 Excel，后 OCR**（做 W7 时必读）
+7. `docs/10-raw-data-ingest.md` —— 原始数据接入（W7）交接与计划：**先 Excel，后 OCR**（做 W7 时必读）
 
 ## 硬约束（改代码前先确认没违背）
 
@@ -21,29 +20,38 @@
 
 ## 当前状态
 
-- 阶段：**W6.6 完成**（W6.5 + Skill 接线 + 工具白名单下沉），**303 条测试全绿**（6 条 PDF 用例需 `pypdf`，未装则 skip）；**W7 原始数据接入进行中**。
+- 阶段：**W6.6 完成**；**W7 原始数据接入完成（Excel + OCR + Web 上传）**，**343 条测试全绿**（无 `pypdf`/OCR 依赖时相关用例 skip）。
 - 决策：D1–D13 已锁定，见 `docs/00-project-context.md` 第 5 节。
 - 规则库：v1.6，46 条（L1 10 / L2 14 / L3 10 / L4 12）；变更记录 20–32 见 `docs/01`。
-- 指标：主评测 100% / 100% / 0 / 100%；`make gate` **11/11**（含无引用断言率、引用不可回查率）；
+- 指标：主评测 100% / 100% / 0 / 100%；`make gate` **12/12**（含无引用断言率、引用不可回查率、抽取字段准确率）；
   检索 recall@1 93.3% / recall@3 100% / MRR 0.961；模式对比结论一致率 100%（3.7→4.4 步）；
   ASGI 并发 10 P95 约 49ms；单票成本 ¥0.0002（mock 估算，非真实账单）。
 - W6.6 接线：Agent Skill 默认注入说明文本（`LOGIAGENT_SKILL=off` 可关）、
   工具白名单下沉到 `ToolRegistry`（越权调用在工具层拒绝）；`/api/health` 增加 `skill{name,enabled}`。
-- W7 原始数据接入（进行中）：`src/ingest/` 已有类型检测（`detect.py`，Excel / 文字层 PDF / 扫描 PDF / 图片，
-  pypdf 可选 + 字节特征兜底）、文字层 PDF 抽取（`pdf_text.py`）与端到端管线
-  （`pipeline.py`：文件 → 五单 JSON → 审核）；`examples/raw/` 有 4 份单件样本 + `pdf/` 五单成套样本。
-  实测：五份 PDF → `FIX`，仅 `L2-13` 一条问题。**Excel 与 OCR（扫描件）抽取适配器尚未接**；
-  先 Excel 后 OCR，计划与验收标准见 `docs/10-raw-data-ingest.md`。
-- 新增入口：`make baseline` / `baseline-check`（回归门槛）、`make ask CASE=xxx Q="..."`（追问）、
-  `make retrieval|modes|vectors|hallucination|shadow|async`（各项评测）、`python -m src.rag.reindex`（增量索引）。
-  HTTP：`POST /api/cases/{id}/ask`、`POST /api/extract`、`GET /api/health`（含 `model{offline,routes,tiers}`）；
-  UI 有「为什么？」按钮、历史提示条、右上角模型标签（读 health，不写死）。
-- 能力边界：`README` 能力矩阵按「已实现 / 未实现 / 接口预留」三态标注；OCR、pgvector/Milvus、
-  A2A/OAuth、云平台与 Secrets 未做；现场采用记录见 `docs/08`（1/5）。
+- W7 原始数据接入（已完成）：`src/ingest/` 三路抽取全部打通——
+  类型检测（`detect.py`）、文字层 PDF（`pdf_text.py`）、Excel（`excel.py`：表头同义词 / 合并单元格 /
+  明细停止 / 置信度）、**OCR**（`ocr.py` + `ocr_pdf.py`：RapidOCR 端口 + mock 兜底、扫描 PDF 取嵌入图、
+  按块坐标切表、代码表纠错、locator）、端到端管线（`pipeline.py`：`table`/`text`/`ocr`）。
+  `examples/raw/` 有单件样本 + `pdf/` 五单 PDF + `合成五单-2026-0901.xlsx` + 2 页/5 页扫描件。
+  实测：五份 PDF、五 sheet Excel、2 页扫描件 + 三份 PDF、五页扫描件 → 都是 `FIX`，仅 `L2-13`；
+  `evals/extraction.py` 四条路由字段准确率 100%（已进 gate 第 12 项）。
+  HTTP/UI：`POST /api/ingest`（multipart）→ 建审核单，FastAPI 与兜底服务都支持；详情页「原始单证」页签
+  展示逐文件置信度/缺字段；原件留档 `var/uploads/<case_id>/`。Docker 默认装 Excel/PDF 依赖，
+  **docker compose 默认 `WITH_OCR=1`（含 RapidOCR）**；裸 `docker build` 默认不含，需
+  `--build-arg WITH_OCR=1`，`WITH_OCR=0 docker compose up --build` 可省体积。
+  OCR 依赖见 `requirements-ocr.txt`，不装时相关用例 skip，核心测试不受影响。
+- 新增入口：`make baseline` / `baseline-check`（回归门槛）、`make extraction`（抽取层字段准确率 + CER）、
+  `make ask CASE=xxx Q="..."`（追问）、`make retrieval|modes|vectors|hallucination|shadow|async`（各项评测）、
+  `python -m src.rag.reindex`（增量索引）。
+  HTTP：`POST /api/ingest`（multipart 原始文件上传）、`POST /api/cases/{id}/ask`、`POST /api/extract`、
+  `GET /api/health`（含 `model{offline,routes,tiers}`）；
+  UI 有「为什么？」按钮、历史提示条、右上角模型标签（读 health，不写死）、原始单证上传与解析页签。
+- 能力边界：`README` 能力矩阵按「已实现 / 未实现 / 接口预留」三态标注；原始数据三路（Excel/文字 PDF/OCR）
+  已实现；MinerU 可选后端、pgvector/Milvus、A2A/OAuth、云平台与 Secrets 未做；现场采用记录见 `docs/08`（1/5）。
 - Web 审核台：`make demo`（无依赖兜底）或 `make api`（FastAPI）；前端 `make web-dev` / `make web-build`。
 - 交付：`make docker-build` / `docker-up`；`make gate`；`make demo-script`；文档见 `docs/04`–`06`。
 - 跑单票：`python -m src.app.cli audit IMP-0043 --auto --offline`
-- 一键评测：`make eval`（主评测 + 复核 + Judge + 红队 + 性能 + 幻觉 + 模式 + 检索 + 影子）
+- 一键评测：`make eval`（主评测 + 复核 + Judge + 红队 + 性能 + 幻觉 + 模式 + 检索 + 影子 + 抽取层）
 - MCP：`python -m src.mcp.server --case IMP-0001`（stdio JSON-RPC）
 
 ## 新会话从这里开始（2026-10-27 交接）
@@ -51,13 +59,13 @@
 **先跑这三条，确认基线没坏**：
 
 ```bash
-python -m unittest discover -s tests        # 应 303 条 OK（6 条 PDF 用例需 pypdf，未装则 skip）
-python scripts/gate.py                      # 应 11/11 全绿
+python -m unittest discover -s tests        # 应 343 条 OK（缺 pypdf/OCR 依赖时相关用例 skip）
+python scripts/gate.py                      # 应 12/12 全绿
 python scripts/baseline_check.py            # 应「未发现退化」
 ```
 
-**做 W7（原始数据接入）**：读 `docs/10-raw-data-ingest.md`，按第 4 节先做 Excel 适配器，
-第 5 节再做 OCR；验收标准在该文档里。
+**W7（原始数据接入）已完成**：Excel 见 `docs/10` 第 4.7 节，OCR 见第 5.6 节。
+下一步按 `docs/10` 第 9 节：真实脱敏扫描件评测 / 决定是否接 MinerU。验收标准在该文档里。
 
 **当前跑的是离线 mock**（`/api/health` 的 `model.offline=true`）：`gpt-4o-mini` / `gpt-4o`
 只是路由表里的名字，仓库里没有任何模型权重，也没花过钱。接真模型只需设

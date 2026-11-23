@@ -80,6 +80,9 @@
   <div class="toolbar">
     <select id="scenario"></select>
     <button class="primary" id="newAudit">新建审核</button>
+    <button id="uploadDocs">上传原始单证</button>
+    <input type="file" id="docFiles" multiple style="display:none"
+           accept=".xlsx,.xlsm,.pdf,.png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp" />
     <button id="refresh">刷新列表</button>
     <span class="muted" id="hint"></span>
   </div>
@@ -241,9 +244,40 @@ async function openCase(id) {
     });
     const r = await api("/api/cases/" + encodeURIComponent(id));
     renderDetail(r);
+    await renderIngest(id);
   } catch (e) {
     showError("加载详情失败：" + e.message);
   }
+}
+
+async function renderIngest(id) {
+  let meta;
+  try {
+    meta = await api("/api/cases/" + encodeURIComponent(id) + "/ingest");
+  } catch (_) {
+    return;
+  }
+  if (!meta || !meta.available) return;
+  const missing = (meta.missing_docs || []).join(" / ") || "无";
+  const rows = (meta.files || []).map((f) => `
+    <tr>
+      <td class="mono">${esc(f.filename)}</td>
+      <td>${esc(f.doc_type || "未识别")}</td>
+      <td>${esc(f.route || "-")}${f.page ? " / 第 " + esc(f.page) + " 页" : ""}${f.sheet ? " / " + esc(f.sheet) : ""}</td>
+      <td>${typeof f.confidence === "number" ? Number(f.confidence).toFixed(2) : "-"}</td>
+      <td>${esc(f.status || "")}</td>
+    </tr>`).join("");
+  const warn = meta.needs_human
+    ? '<div class="banner show">有低置信/未识别项：结论可用，但建议人工确认原始单证。</div>'
+    : "";
+  $("detail").insertAdjacentHTML("beforeend", `
+    <h3 style="font-size:13px;margin:18px 0 8px">原始单证</h3>
+    ${warn}
+    <div class="muted">识别到 ${(meta.docs || []).length} 份单证；缺：${esc(missing)}</div>
+    <table style="margin-top:8px">
+      <thead><tr><th>文件</th><th>单证</th><th>来源</th><th>置信</th><th>状态</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`);
 }
 
 async function decide(id, approved) {
@@ -283,6 +317,30 @@ $("newAudit").onclick = async () => {
   }
 };
 $("refresh").onclick = loadCases;
+
+$("uploadDocs").onclick = () => $("docFiles").click();
+$("docFiles").onchange = async () => {
+  const picked = [...$("docFiles").files];
+  if (!picked.length) return;
+  const form = new FormData();
+  picked.forEach((f) => form.append("files", f));
+  try {
+    showError("");
+    $("hint").textContent = "解析原始单证中…";
+    const res = await fetch("/api/ingest", { method: "POST", body: form });
+    let data = {};
+    try { data = await res.json(); } catch (_) { /* ignore */ }
+    if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+    $("hint").textContent = "";
+    await loadCases();
+    await openCase(data.case_id);
+  } catch (e) {
+    showError("解析失败：" + e.message);
+    $("hint").textContent = "";
+  } finally {
+    $("docFiles").value = "";
+  }
+};
 
 (async function init() {
   try {

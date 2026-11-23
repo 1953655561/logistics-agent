@@ -1,9 +1,10 @@
-"""WebApi 应用服务测试：列表、审核、审批、单证、trace、指标。"""
+"""WebApi 应用服务测试：列表、审核、审批、单证、trace、指标、原始文件上传。"""
 import json
 import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,6 +19,26 @@ from src.engine import RULES                                    # noqa: E402
 from src.harness.approval import AutoApprover                   # noqa: E402
 from src.harness.cost import CostMeter                          # noqa: E402
 from src.harness.tracing import JsonlTracer                     # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+RAW = ROOT / "examples" / "raw"
+XLSX = RAW / "合成发票-INV-2026-0901.xlsx"
+PDF_DIR = RAW / "pdf"
+PDF_FILES = [PDF_DIR / name for name in
+             ("合同-HT-2026-0901.pdf", "装箱单-PL-2026-0901.pdf",
+              "提单-SYN-2026-0901.pdf", "报关单-DEC-2026-0901.pdf")]
+
+try:
+    import openpyxl  # noqa: F401
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
+
+try:
+    import pypdf  # noqa: F401
+    HAS_PYPDF = True
+except ImportError:
+    HAS_PYPDF = False
 
 
 def _case(case_id: str) -> dict:
@@ -40,7 +61,8 @@ def make_web(tmp: str) -> WebApi:
 
     return WebApi(repo, service, trace_dir=tmp, scenarios=scenarios,
                   build_docs=build_docs, rules=RULES,
-                  report_path=os.path.join(tmp, "result.json"))
+                  report_path=os.path.join(tmp, "result.json"),
+                  docs_dir=os.path.join(tmp, "docs"))
 
 
 class TestWebApi(unittest.TestCase):
@@ -187,6 +209,64 @@ class TestWebApi(unittest.TestCase):
         self.assertEqual(rec["state"], "PENDING_APPROVAL")
         self.assertEqual(rec["verdict"], "REVIEW")
         self.assertIn("L1-06", {i["rule_id"] for i in rec["issues"]})
+
+    # ---------- 原始文件上传 ----------
+    @unittest.skipUnless(HAS_OPENPYXL and XLSX.exists(), "需要 openpyxl 与 Excel 样本")
+    def test_ingest_excel_creates_case(self):
+        content = XLSX.read_bytes()
+        rec = self.web.ingest_files(
+            [{"filename": "发票.xlsx", "content": content}], "CUSTOM-ING-1")
+        self.assertEqual(rec["case_id"], "CUSTOM-ING-1")
+        self.assertIn("invoice", rec["ingest"]["docs"])
+        self.assertEqual(rec["ingest"]["missing_docs"],
+                         ["contract", "packing_list", "bl", "declaration"])
+        self.assertFalse(rec["ingest"]["needs_human"])
+        entry = rec["ingest"]["files"][0]
+        self.assertEqual(entry["doc_type"], "invoice")
+        self.assertEqual(entry["route"], "table")
+        self.assertEqual(entry["confidence"], 1.0)
+        # 原始文件留档 + 解析记录可回查
+        uploads = os.path.join(os.path.dirname(self.web.docs_dir), "uploads",
+                               "CUSTOM-ING-1")
+        self.assertTrue(os.listdir(uploads))
+        self.assertTrue(self.web.get_ingest("CUSTOM-ING-1")["available"])
+
+    @unittest.skipUnless(HAS_OPENPYXL and HAS_PYPDF and XLSX.exists()
+                         and all(p.exists() for p in PDF_FILES),
+                         "需要 openpyxl/pypdf 与样本")
+    def test_ingest_full_case_from_files(self):
+        files = [{"filename": "发票.xlsx", "content": XLSX.read_bytes()}]
+        files += [{"filename": p.name, "content": p.read_bytes()} for p in PDF_FILES]
+        rec = self.web.ingest_files(files)
+        self.assertEqual(rec["verdict"], "FIX")
+        self.assertEqual(rec["ingest"]["missing_docs"], [])
+        self.assertEqual(rec["issue_count"], 1)
+        self.assertEqual(set(rec["ingest"]["docs"]),
+                         {"contract", "invoice", "packing_list", "bl", "declaration"})
+
+    def test_ingest_rejects_unsupported_and_empty(self):
+        with self.assertRaises(WebApiError) as ctx:
+            self.web.ingest_files([{"filename": "旧单.xls", "content": b"x"}])
+        self.assertIn(".xlsx", str(ctx.exception))
+        with self.assertRaises(WebApiError):
+            self.web.ingest_files([{"filename": "空.xlsx", "content": b""}])
+        with self.assertRaises(WebApiError):
+            self.web.ingest_files([{"filename": "a.exe", "content": b"x"}])
+        with self.assertRaises(WebApiError):
+            self.web.ingest_files([])
+
+    @unittest.skipUnless(HAS_OPENPYXL and XLSX.exists(), "需要 openpyxl 与 Excel 样本")
+    def test_ingest_sanitizes_filename(self):
+        rec = self.web.ingest_files(
+            [{"filename": "../../evil/发票.xlsx", "content": XLSX.read_bytes()}],
+            "CUSTOM-ING-2")
+        uploads = os.path.join(os.path.dirname(self.web.docs_dir), "uploads",
+                               "CUSTOM-ING-2")
+        names = os.listdir(uploads)
+        self.assertEqual(len(names), 1)
+        self.assertTrue(names[0].endswith(".xlsx"))
+        self.assertNotIn("..", names[0])
+        self.assertEqual(rec["case_id"], "CUSTOM-ING-2")
 
 
 if __name__ == "__main__":

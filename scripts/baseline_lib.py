@@ -6,7 +6,7 @@
 
 设计约束：
 - 门禁阈值只有一份：`scripts/gate.py::checks()`，这里直接复用，不再抄一遍。
-- 快照里只放"可复跑"的量：评测 4 维指标、手改单问题数、规则数、测试数、门禁 11 项。
+- 快照里只放"可复跑"的量：评测 4 维指标、手改单问题数、规则数、测试数、门禁 12 项。
 - 基线是**本机生成**的（P95 之类的绝对量随机器变），所以 baseline.json 不进 git。
 """
 from __future__ import annotations
@@ -77,9 +77,14 @@ def snapshot(with_tests: bool = True) -> dict:
     perf = _json(os.path.join(REPORT, "perf.json"), {})
     redteam = _json(os.path.join(REPORT, "redteam.json"), {})
     hallucination = _json(os.path.join(REPORT, "hallucination.json"), {})
+    extraction = _json(os.path.join(REPORT, "extraction.json"), {})
     agent = result.get("agent") or {}
     cite = result.get("citation") or {}
     concurrent = perf.get("concurrent") or {}
+    extraction_routes = [r for r in extraction.get("routes", []) if not r.get("skipped")]
+    extraction_accuracy = (round(min(float(r.get("field_accuracy", 0.0))
+                                     for r in extraction_routes), 6)
+                           if extraction_routes else None)
 
     return {
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -99,7 +104,11 @@ def snapshot(with_tests: bool = True) -> dict:
         "perf": {"p95_ms": concurrent.get("p95_ms"), "errors": concurrent.get("errors")},
         "redteam": {"blocked": redteam.get("blocked"), "forbidden": redteam.get("forbidden")},
         "gate": [{"name": n, "ok": ok, "actual": a} for n, ok, a in
-                 gate.checks(result, perf, redteam, hallucination)],
+                 gate.checks(result, perf, redteam, hallucination, extraction)],
+        "extraction": {
+            "routes": len(extraction_routes),
+            "min_field_accuracy": extraction_accuracy,
+        },
         "hand_doc": _doc_issues(HAND_DOC),
         "clean_doc": _doc_issues(CLEAN_DOC),
         "tests": _tests() if with_tests else {"total": None, "ok": None},
@@ -126,6 +135,13 @@ def compare(base: dict, cur: dict) -> list[str]:
     lower_is_bad("recall", "缺陷召回率")
     higher_is_bad("false_positive_case_rate", "误报用例率")
     lower_is_bad("citation_coverage", "引用覆盖率")
+
+    # 抽取层：字段准确率不能下降（OCR/表头改动最容易在这里退化）
+    be, ce = base.get("extraction") or {}, cur.get("extraction") or {}
+    if be.get("min_field_accuracy") is not None and ce.get("min_field_accuracy") is not None:
+        if ce["min_field_accuracy"] < be["min_field_accuracy"] - eps:
+            bad.append(f"抽取字段准确率退化：{be['min_field_accuracy']:.4f} → "
+                       f"{ce['min_field_accuracy']:.4f}")
 
     # 手改单：问题数不能变少（变少意味着漏报）
     bh, ch = base.get("hand_doc") or {}, cur.get("hand_doc") or {}

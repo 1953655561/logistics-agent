@@ -174,7 +174,7 @@ class AuditLoop:
                                 "rule.search")
                 if isinstance(hit, dict) and hit.get("hits"):
                     first = hit["hits"][0]
-                    it["citation_text"] = f"依据：{first.get('section', '')}"
+                    it["citation_text"] = first.get("section", "") or ""
                     it["citation_chunk"] = first.get("chunk_id", "")
                     it["citation_excerpt"] = (first.get("text") or "")[:120]
                     r.citations.append({"rule_id": rid,

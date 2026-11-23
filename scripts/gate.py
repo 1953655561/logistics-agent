@@ -7,8 +7,9 @@
 - evals/report/perf.json（并发性能：P95/单票成本/错误数）
 - evals/report/redteam.json（红队：拦截数/auto_change_hs）
 - evals/report/hallucination.json（无引用断言率/引用不可回查率）
+- evals/report/extraction.json（抽取层：字段准确率，至少 Excel + 文字层 PDF 两条路由）
 
-11 项全过返回 0，任意一项不过返回 1。阈值只在本文件定义：
+12 项全过返回 0，任意一项不过返回 1。阈值只在本文件定义：
 `scripts/baseline_check.py` 与 `scripts/alert.py` 都复用 `checks()`，不各抄一份。
 """
 from __future__ import annotations
@@ -26,6 +27,20 @@ REPORT = os.path.join(ROOT, "evals", "report")
 # 再按新的观测分布收紧或放宽，并同步更新 docs/02 第 9 节。
 UNCITED_RATE_MAX = 0.0
 BROKEN_CITATION_RATE_MAX = 0.0
+
+# 抽取层：字段准确率下限 + 至少两条路由（Excel + 文字层 PDF），
+# 避免 OCR 依赖缺失时只剩一条路由还"假绿"。
+EXTRACTION_MIN_ACCURACY = 0.90
+EXTRACTION_MIN_ROUTES = 2
+
+
+def _extraction_check(extraction: dict | None) -> tuple[bool, str]:
+    routes = [r for r in (extraction or {}).get("routes", []) if not r.get("skipped")]
+    if len(routes) < EXTRACTION_MIN_ROUTES:
+        return False, f"覆盖不足（{len(routes)} 条路由）"
+    accuracies = [float(r.get("field_accuracy", 0.0)) for r in routes]
+    minimum = min(accuracies)
+    return minimum >= EXTRACTION_MIN_ACCURACY, f"{minimum:.1%}（{len(routes)} 条路由）"
 
 
 def _load(name: str) -> dict:
@@ -46,11 +61,12 @@ def _load_optional(name: str) -> dict:
 
 
 def checks(result: dict, perf: dict, redteam: dict,
-           hallucination: dict | None = None) -> list[tuple[str, bool, str]]:
-    """11 项指标门禁。单一事实源：baseline_check 与告警都从这里取阈值。
+           hallucination: dict | None = None,
+           extraction: dict | None = None) -> list[tuple[str, bool, str]]:
+    """12 项指标门禁。单一事实源：baseline_check 与告警都从这里取阈值。
 
     第 10、11 项是 P3 新增的幻觉指标；`hallucination` 传空字典时按失败处理
-    （缺观测值不能当作 0 风险）。
+    （缺观测值不能当作 0 风险）。第 12 项是 W7 抽取层字段准确率。
     """
     agent = result.get("agent") or {}
     cite = result.get("citation") or {}
@@ -63,6 +79,7 @@ def checks(result: dict, perf: dict, redteam: dict,
         broken = float(broken)
     except (TypeError, ValueError):
         uncited = broken = 1.0
+    extraction_ok, extraction_actual = _extraction_check(extraction)
     return [
         ("结论准确率 ≥ 95%", result.get("accuracy", 0) >= 0.95,
          f"{result.get('accuracy', 0):.1%}"),
@@ -86,6 +103,8 @@ def checks(result: dict, perf: dict, redteam: dict,
          f"{uncited:.1%}"),
         (f"引用不可回查率 ≤ {BROKEN_CITATION_RATE_MAX:.0%}",
          broken <= BROKEN_CITATION_RATE_MAX, f"{broken:.1%}"),
+        (f"抽取字段准确率 ≥ {EXTRACTION_MIN_ACCURACY:.0%}",
+         extraction_ok, extraction_actual),
     ]
 
 
@@ -103,8 +122,12 @@ def main() -> int:
     if not hallucination:
         print("⚠ 缺少 hallucination.json，第 10、11 项按失败计；"
               "请先运行 `python evals/hallucination.py`")
+    extraction = _load_optional("extraction.json")
+    if not extraction:
+        print("⚠ 缺少 extraction.json，第 12 项按失败计；"
+              "请先运行 `python evals/extraction.py`")
 
-    items = checks(result, perf, redteam, hallucination)
+    items = checks(result, perf, redteam, hallucination, extraction)
 
     print("指标门禁")
     print("=" * 58)

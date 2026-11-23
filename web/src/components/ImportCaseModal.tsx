@@ -6,11 +6,12 @@ import {
   Input,
   Modal,
   Space,
+  Tabs,
   Tag,
   Typography,
   Upload,
 } from "antd";
-import type { UploadProps } from "antd";
+import type { UploadFile, UploadProps } from "antd";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import styles from "./ImportCaseModal.module.css";
@@ -23,6 +24,8 @@ const DOC_LABEL: Record<string, string> = {
   bl: "提单",
   declaration: "报关单",
 };
+
+const RAW_ACCEPT = ".xlsx,.xlsm,.pdf,.png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp";
 
 interface Props {
   open: boolean;
@@ -77,14 +80,18 @@ function parseDocs(raw: string): Parsed {
 export default function ImportCaseModal({ open, onClose, onImported }: Props) {
   const { message } = AntApp.useApp();
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<"json" | "files">("json");
   const [caseId, setCaseId] = useState("");
   const [text, setText] = useState("");
+  const [files, setFiles] = useState<UploadFile[]>([]);
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     if (open) {
+      setTab("json");
       setCaseId("");
       setText("");
+      setFiles([]);
       setLoadError("");
     }
   }, [open]);
@@ -132,7 +139,35 @@ export default function ImportCaseModal({ open, onClose, onImported }: Props) {
     onError: (err: Error) => message.error(err.message),
   });
 
-  const canSubmit = Boolean(parsed.docs) && !submit.isPending;
+  const ingest = useMutation({
+    mutationFn: () => {
+      const raw: File[] = [];
+      for (const item of files) {
+        if (item.originFileObj) raw.push(item.originFileObj);
+      }
+      if (!raw.length) throw new Error("请选择要解析的原始文件");
+      return api.ingestFiles(caseId.trim(), raw);
+    },
+    onSuccess: (data) => {
+      const meta = data.ingest;
+      const text = `已解析并审核：${data.case_id} · ${meta.docs.length} 份单证 · ${data.verdict}`;
+      if (meta.needs_human) {
+        message.warning(`${text}（有低置信/未识别项，详情页「原始单证」可查看）`);
+      } else {
+        message.success(text);
+      }
+      queryClient.setQueryData(["case", data.case_id], data);
+      queryClient.invalidateQueries({ queryKey: ["cases"] });
+      queryClient.invalidateQueries({ queryKey: ["ingest", data.case_id] });
+      onImported(data.case_id);
+      onClose();
+    },
+    onError: (err: Error) => message.error(err.message),
+  });
+
+  const busy = submit.isPending || ingest.isPending;
+  const canSubmit =
+    tab === "json" ? Boolean(parsed.docs) && !busy : files.length > 0 && !busy;
 
   return (
     <Modal
@@ -144,21 +179,18 @@ export default function ImportCaseModal({ open, onClose, onImported }: Props) {
       footer={
         <Space>
           <Button onClick={onClose}>取消</Button>
-          <Button type="primary" loading={submit.isPending} disabled={!canSubmit}
-                  onClick={() => submit.mutate()}>
-            导入并审核
+          <Button
+            type="primary"
+            loading={busy}
+            disabled={!canSubmit}
+            onClick={() => (tab === "json" ? submit.mutate() : ingest.mutate())}
+          >
+            {tab === "json" ? "导入并审核" : "解析并审核"}
           </Button>
         </Space>
       }
     >
       <Space direction="vertical" size={12} style={{ width: "100%" }}>
-        <Alert
-          type="info"
-          showIcon
-          message="粘贴或上传结构化单证 JSON"
-          description="顶层是五份单证：contract / invoice / packing_list / bl / declaration。可以只传其中几份用于测试缺单证场景；业务缺陷（金额、数量、要素）交给规则引擎判断。"
-        />
-
         <div className={styles.row}>
           <Input
             value={caseId}
@@ -167,35 +199,90 @@ export default function ImportCaseModal({ open, onClose, onImported }: Props) {
             style={{ flex: 1 }}
             maxLength={40}
           />
-          <Button onClick={loadSample}>载入示例（IMP-0019）</Button>
+          <Button onClick={loadSample} disabled={tab !== "json"}>
+            载入示例（IMP-0019）
+          </Button>
           <Upload accept=".json,application/json" showUploadList={false}
-                  beforeUpload={beforeUpload}>
-            <Button>选择 JSON 文件</Button>
+                  beforeUpload={beforeUpload} disabled={tab !== "json"}>
+            <Button disabled={tab !== "json"}>选择 JSON 文件</Button>
           </Upload>
         </div>
 
-        <Input.TextArea
-          className={styles.editor}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={15}
-          spellCheck={false}
-          placeholder={'{\n  "contract": {...},\n  "invoice": {...},\n  "packing_list": {...},\n  "bl": {...},\n  "declaration": {...}\n}'}
+        <Tabs
+          activeKey={tab}
+          onChange={(key) => setTab(key as "json" | "files")}
+          items={[
+            {
+              key: "json",
+              label: "结构化 JSON",
+              children: (
+                <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="粘贴或上传结构化单证 JSON"
+                    description="顶层是五份单证：contract / invoice / packing_list / bl / declaration。可以只传其中几份用于测试缺单证场景；业务缺陷（金额、数量、要素）交给规则引擎判断。"
+                  />
+                  <Input.TextArea
+                    className={styles.editor}
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    rows={13}
+                    spellCheck={false}
+                    placeholder={'{\n  "contract": {...},\n  "invoice": {...},\n  "packing_list": {...},\n  "bl": {...},\n  "declaration": {...}\n}'}
+                  />
+                  {text.trim() ? (
+                    parsed.error ? (
+                      <Alert type="error" showIcon message={parsed.error} />
+                    ) : (
+                      <Space wrap>
+                        <Tag color="green">JSON 可解析</Tag>
+                        {(parsed.present ?? []).map((k) => (
+                          <Tag key={k}>{DOC_LABEL[k] ?? k}</Tag>
+                        ))}
+                        <Typography.Text type="secondary">{parsed.summary}</Typography.Text>
+                      </Space>
+                    )
+                  ) : null}
+                </Space>
+              ),
+            },
+            {
+              key: "files",
+              label: "原始单证（Excel / PDF / 扫描件）",
+              children: (
+                <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="直接上传原始文件，系统自动识别单证类型并审核"
+                    description="支持 .xlsx / .pdf / 扫描件图片；一次最多 12 个文件、单个 20MB。文字层 PDF 与 Excel 不需要 OCR；扫描件需要 OCR 依赖：本机 `pip install -r requirements-ocr.txt`，`docker compose` 默认已带 OCR（裸 `docker build` 需 `--build-arg WITH_OCR=1`）。缺依赖时会明确提示「未安装 OCR 引擎」，不会静默放行。"
+                  />
+                  <Upload.Dragger
+                    multiple
+                    accept={RAW_ACCEPT}
+                    fileList={files}
+                    beforeUpload={() => false}
+                    onChange={({ fileList }) => setFiles(fileList)}
+                  >
+                    <p className="ant-upload-drag-icon">
+                      <Tag color="blue">拖拽</Tag>
+                    </p>
+                    <p className="ant-upload-text">点击或拖拽原始单证到此处</p>
+                    <p className="ant-upload-hint">
+                      五单可以拆成多个文件；同一份工作簿里的多个 sheet 会自动逐张识别。
+                    </p>
+                  </Upload.Dragger>
+                  {files.length ? (
+                    <Typography.Text type="secondary">
+                      已选 {files.length} 个文件；解析结果（识别到的单证、置信度、转人工项）会写入审核单详情页。
+                    </Typography.Text>
+                  ) : null}
+                </Space>
+              ),
+            },
+          ]}
         />
-
-        {text.trim() ? (
-          parsed.error ? (
-            <Alert type="error" showIcon message={parsed.error} />
-          ) : (
-            <Space wrap>
-              <Tag color="green">JSON 可解析</Tag>
-              {(parsed.present ?? []).map((k) => (
-                <Tag key={k}>{DOC_LABEL[k] ?? k}</Tag>
-              ))}
-              <Typography.Text type="secondary">{parsed.summary}</Typography.Text>
-            </Space>
-          )
-        ) : null}
 
         {loadError ? <Alert type="warning" showIcon message={loadError} /> : null}
 

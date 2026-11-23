@@ -1,15 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   App as AntApp,
   Button,
   Card,
+  Collapse,
   Descriptions,
   Empty,
   List,
   Modal,
+  Segmented,
+  Skeleton,
   Space,
-  Spin,
   Tabs,
   Tag,
   Timeline,
@@ -19,7 +21,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type AskOut, type CaseDetail, type HistoryHint } from "../api/client";
 import ApprovalDrawer from "../components/ApprovalDrawer";
 import JsonView from "../components/JsonView";
-import { Money, SeverityTag, StatusTag, VerdictTag } from "../components/tags";
+import {
+  Money,
+  ReviewTag,
+  SeverityTag,
+  StatusTag,
+  VerdictTag,
+  formatTime,
+  localizeText,
+} from "../components/tags";
 import styles from "./CaseDetailPage.module.css";
 
 type Issue = NonNullable<CaseDetail["issues"]>[number];
@@ -39,11 +49,54 @@ const DOC_LABELS: Record<string, string> = {
   declaration: "报关单",
 };
 
+/** 证据渲染：把机器结构翻成人能扫的 chips，而不是把 JSON 直接打出来。 */
+function EvidenceView({ evidence }: { evidence: Record<string, unknown> }) {
+  const entries = Object.entries(evidence ?? {});
+  if (!entries.length) return null;
+  return (
+    <div className={styles.evidence}>
+      <Typography.Text type="secondary">对比：</Typography.Text>
+      <Space wrap size={4}>
+        {entries.flatMap(([key, value]) => {
+          if (key === "suggestions" && Array.isArray(value)) {
+            return (value as Array<Record<string, unknown>>).slice(0, 3).map((s, i) => (
+              <Tag key={`${key}-${i}`} color="blue">
+                {String(s.hs6 ?? "")} · {String(s.name ?? "")} ·{" "}
+                {Number(s.confidence ?? 0).toFixed(2)}
+              </Tag>
+            ));
+          }
+          if (Array.isArray(value)) {
+            return [
+              <Tag key={key}>
+                {key}：{value.join(" / ")}
+              </Tag>,
+            ];
+          }
+          if (value !== null && typeof value === "object") {
+            return [
+              <Tag key={key}>
+                {key}：{JSON.stringify(value)}
+              </Tag>,
+            ];
+          }
+          return [
+            <Tag key={key}>
+              {key}：{String(value)}
+            </Tag>,
+          ];
+        })}
+      </Space>
+    </div>
+  );
+}
+
 export default function CaseDetailPage({ caseId, onAudit }: Props) {
   const { message } = AntApp.useApp();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState("issues");
   const [approvalOpen, setApprovalOpen] = useState(false);
+  const [sev, setSev] = useState<string>("all");
   const [askState, setAskState] = useState<{
     ruleId: string;
     loading: boolean;
@@ -54,6 +107,7 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
   useEffect(() => {
     setTab("issues");
     setApprovalOpen(false);
+    setSev("all");
   }, [caseId]);
 
   const detail = useQuery({
@@ -68,6 +122,12 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
     enabled: !!caseId && tab === "docs",
   });
 
+  const ingest = useQuery({
+    queryKey: ["ingest", caseId],
+    queryFn: () => api.getIngest(caseId as string),
+    enabled: !!caseId && tab === "ingest",
+  });
+
   const reAudit = useMutation({
     mutationFn: (id: string) => api.audit(id),
     onSuccess: (data) => {
@@ -78,6 +138,32 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
     },
     onError: (err: Error) => message.error(err.message),
   });
+
+  // 历史提示：按 note 去重，同一句话只出现一次，并把主体合并展示。
+  // （后端每个主体各出一条，文案往往相同，直接 join 会出现三段重复。）
+  const hintGroups = useMemo(() => {
+    const hs =
+      ((detail.data as unknown as { history_hints?: HistoryHint[] } | undefined)
+        ?.history_hints) ?? [];
+    const map = new Map<
+      string,
+      { note: string; labels: string[]; cases: string[]; seen: number }
+    >();
+    for (const h of hs) {
+      const g = map.get(h.note) ?? { note: h.note, labels: [], cases: [], seen: 0 };
+      if (!g.labels.includes(h.label)) g.labels.push(h.label);
+      g.seen = Math.max(g.seen, h.seen_cases ?? 0);
+      for (const c of h.cases ?? []) if (!g.cases.includes(c)) g.cases.push(c);
+      map.set(h.note, g);
+    }
+    return [...map.values()].map((g) => ({ ...g, cases: g.cases.slice(0, 3) }));
+  }, [detail.data]);
+
+  // 三组提示往往指向同一批来源单，按唯一单号去重后再计数
+  const hintCaseCount = useMemo(
+    () => new Set(hintGroups.flatMap((g) => g.cases)).size,
+    [hintGroups],
+  );
 
   if (!caseId) {
     return (
@@ -90,7 +176,7 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
   if (detail.isLoading) {
     return (
       <Card className={styles.card} title={`单票详情 · ${caseId}`}>
-        <div className={styles.center}><Spin /></div>
+        <Skeleton active paragraph={{ rows: 8 }} />
       </Card>
     );
   }
@@ -108,8 +194,16 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
   const issues = d.issues ?? [];
   const steps = d.steps ?? [];
   const guard = d.guard ?? [];
-  // history_hints 是 v1.6 新字段，生成类型里还没有，这里局部断言
-  const hints = ((d as unknown as { history_hints?: HistoryHint[] }).history_hints) ?? [];
+  const counts = { high: 0, mid: 0, low: 0 };
+  for (const it of issues) {
+    const k: "high" | "mid" | "low" =
+      it.severity === "high" || it.severity === "mid" || it.severity === "low"
+        ? it.severity
+        : "low";
+    counts[k] += 1;
+  }
+  const shownIssues =
+    sev === "all" ? issues : issues.filter((it) => (it.severity ?? "low") === sev);
 
   const askWhy = (ruleId: string, fieldPath = "") => {
     const field = fieldPath ? `（字段 ${fieldPath}）` : "";
@@ -178,51 +272,86 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
             .join("、")}`}
         />
       ) : null}
-      {hints.length ? (
-        <Alert
-          className={styles.alert}
-          type="info"
-          showIcon
-          message={`历史提示：${hints.map((h) => h.note).join("；")}`}
-          description={
-            <Space wrap size={4}>
-              <Typography.Text type="secondary">来源单：</Typography.Text>
-              {(hints[0].cases ?? []).map((cid) => (
-                <Tag key={cid}>{cid}</Tag>
-              ))}
-            </Space>
-          }
+      {hintGroups.length ? (
+        <Collapse
+          size="small"
+          className={styles.hints}
+          items={[
+            {
+              key: "hints",
+              label: (
+                <Space size={6} wrap>
+                  <Tag color="blue" style={{ marginInlineEnd: 0 }}>
+                    历史提示
+                  </Tag>
+                  <Typography.Text type="secondary">
+                    {hintGroups.length} 组
+                    {hintCaseCount ? ` · 涉及 ${hintCaseCount} 票` : ""}
+                  </Typography.Text>
+                </Space>
+              ),
+              children: (
+                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                  {hintGroups.map((g, i) => (
+                    <div key={i}>
+                      <Space size={6} wrap>
+                        <Tag>{g.labels.join(" / ")}</Tag>
+                        <Typography.Text>{g.note}</Typography.Text>
+                      </Space>
+                      {g.cases.length ? (
+                        <div className={styles.hintCases}>
+                          来源单：
+                          {g.cases.map((cid) => (
+                            <Tag key={cid}>{cid}</Tag>
+                          ))}
+                          {g.seen > g.cases.length ? (
+                            <Typography.Text type="secondary">
+                              （共 {g.seen} 票，显示前 {g.cases.length} 个）
+                            </Typography.Text>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </Space>
+              ),
+            },
+          ]}
         />
       ) : null}
 
-      <Descriptions
-        size="small"
-        column={2}
-        colon={false}
-        className={styles.meta}
-        items={[
-          { key: "state", label: "状态", children: <StatusTag state={d.state} /> },
-          { key: "verdict", label: "结论", children: <VerdictTag verdict={d.verdict} /> },
-          { key: "issues", label: "问题数", children: d.issue_count },
-          { key: "cost", label: "单票成本", children: <Money value={d.cost} /> },
-          {
-            key: "review",
-            label: "复核",
-            span: 2,
-            children: review.recommendation ? (
-              <Space wrap>
-                <Tag>{review.recommendation}</Tag>
-                <Typography.Text type="secondary">
-                  {review.reason || "—"}
-                </Typography.Text>
-              </Space>
-            ) : (
-              "—"
-            ),
-          },
-          { key: "updated", label: "更新时间", span: 2, children: d.updated_at || "—" },
-        ]}
-      />
+      <div className={styles.metaRow}>
+        <span className={styles.metaItem}>
+          <Typography.Text type="secondary">状态</Typography.Text>
+          <StatusTag state={d.state} />
+        </span>
+        <span className={styles.metaItem}>
+          <Typography.Text type="secondary">结论</Typography.Text>
+          <VerdictTag verdict={d.verdict} />
+        </span>
+        <span className={styles.metaItem}>
+          <Typography.Text type="secondary">问题</Typography.Text>
+          <Typography.Text strong>{d.issue_count ?? 0}</Typography.Text>
+        </span>
+        <span className={styles.metaItem}>
+          <Typography.Text type="secondary">单票成本</Typography.Text>
+          <Money value={d.cost} />
+        </span>
+        <span className={styles.metaItem}>
+          <Typography.Text type="secondary">复核</Typography.Text>
+          <ReviewTag recommendation={review.recommendation} />
+        </span>
+        <span className={styles.metaItem}>
+          <Typography.Text type="secondary">更新</Typography.Text>
+          <Typography.Text>{formatTime(d.updated_at, true)}</Typography.Text>
+        </span>
+      </div>
+      {review.reason ? (
+        <div className={styles.reviewLine}>
+          <Typography.Text type="secondary">复核意见：</Typography.Text>
+          <Typography.Text>{localizeText(review.reason)}</Typography.Text>
+        </div>
+      ) : null}
 
       <Tabs
         activeKey={tab}
@@ -232,10 +361,25 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
             key: "issues",
             label: `问题清单 ${issues.length}`,
             children: issues.length ? (
-              <List
-                className={styles.list}
-                dataSource={issues}
-                renderItem={(it: Issue) => (
+              <>
+                <div className={styles.issueFilter}>
+                  <Segmented
+                    size="small"
+                    value={sev}
+                    onChange={(v) => setSev(String(v))}
+                    options={[
+                      { label: `全部 ${issues.length}`, value: "all" },
+                      { label: `高 ${counts.high}`, value: "high" },
+                      { label: `中 ${counts.mid}`, value: "mid" },
+                      { label: `低 ${counts.low}`, value: "low" },
+                    ]}
+                  />
+                </div>
+                <List
+                  className={styles.list}
+                  dataSource={shownIssues}
+                  locale={{ emptyText: "该级别没有问题" }}
+                  renderItem={(it: Issue) => (
                   <List.Item className={`${styles.issue} ${styles[it.severity || "low"] ?? ""}`}>
                     <div className={styles.issueBody}>
                       <Space wrap size={6}>
@@ -245,7 +389,8 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
                       </Space>
                       {it.citation_text || it.citation ? (
                         <div className={styles.cite}>
-                          依据：{it.citation_text || it.citation}
+                          依据：
+                          {(it.citation_text || it.citation || "").replace(/^依据：/, "")}
                           {it.citation_chunk ? (
                             <Typography.Text code className={styles.chunk}>
                               {it.citation_chunk}
@@ -267,17 +412,13 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
                         </Button>
                       ) : null}
                       {it.evidence && Object.keys(it.evidence).length ? (
-                        <div className={styles.cite}>
-                          对比：
-                          {Object.entries(it.evidence)
-                            .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-                            .join("；")}
-                        </div>
+                        <EvidenceView evidence={it.evidence as Record<string, unknown>} />
                       ) : null}
                     </div>
                   </List.Item>
                 )}
-              />
+                />
+              </>
             ) : (
               <Empty description="无问题，可直接申报" />
             ),
@@ -286,7 +427,7 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
             key: "docs",
             label: "单证",
             children: docs.isLoading ? (
-              <div className={styles.center}><Spin /></div>
+              <Skeleton active paragraph={{ rows: 6 }} />
             ) : docs.isError ? (
               <Alert type="error" showIcon message={(docs.error as Error).message} />
             ) : (
@@ -298,6 +439,74 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
                   children: <JsonView data={value} />,
                 }))}
               />
+            ),
+          },
+          {
+            key: "ingest",
+            label: "原始单证",
+            children: ingest.isLoading ? (
+              <Skeleton active paragraph={{ rows: 5 }} />
+            ) : ingest.isError ? (
+              <Alert type="error" showIcon message={(ingest.error as Error).message} />
+            ) : !ingest.data?.available ? (
+              <Empty description="本单不是由原始文件上传创建（或没有解析记录）" />
+            ) : (
+              <Space direction="vertical" size={10} style={{ width: "100%" }}>
+                {ingest.data.needs_human ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="有低置信/未识别项：审核结论可用，但建议人工确认原始单证后再放行。"
+                  />
+                ) : null}
+                <Typography.Text type="secondary">
+                  识别到 {ingest.data.docs.length} 份单证
+                  {ingest.data.missing_docs.length
+                    ? `，缺少 ${ingest.data.missing_docs
+                        .map((k) => DOC_LABELS[k] ?? k)
+                        .join(" / ")}`
+                    : "（五单齐套）"}
+                  ；共 {ingest.data.files.length} 个文件/页面。
+                </Typography.Text>
+                <List
+                  size="small"
+                  dataSource={ingest.data.files}
+                  renderItem={(f) => (
+                    <List.Item>
+                      <Space direction="vertical" size={2} style={{ width: "100%" }}>
+                        <Space wrap size={6}>
+                          <Typography.Text code>{f.filename}</Typography.Text>
+                          {f.doc_type ? (
+                            <Tag color="blue">{DOC_LABELS[f.doc_type] ?? f.doc_type}</Tag>
+                          ) : (
+                            <Tag color="error">未识别单证</Tag>
+                          )}
+                          <Tag>{f.route || "—"}</Tag>
+                          {f.engine ? <Tag>{f.engine}</Tag> : null}
+                          {typeof f.confidence === "number" ? (
+                            <Tag color={f.confidence >= 0.9 ? "green" : "orange"}>
+                              置信 {f.confidence.toFixed(2)}
+                            </Tag>
+                          ) : null}
+                          {f.status && f.status !== "ok" ? (
+                            <Tag color="error">{f.status}</Tag>
+                          ) : null}
+                        </Space>
+                        {f.missing.length ? (
+                          <Typography.Text type="secondary">
+                            缺字段：{f.missing.join("、")}
+                          </Typography.Text>
+                        ) : null}
+                        {f.checks.length ? (
+                          <Typography.Text type="secondary">
+                            提示：{f.checks.join("；")}
+                          </Typography.Text>
+                        ) : null}
+                      </Space>
+                    </List.Item>
+                  )}
+                />
+              </Space>
             ),
           },
           {
@@ -342,10 +551,14 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
                     {
                       key: "rec",
                       label: "建议",
-                      children: review.recommendation || "—",
+                      children: <ReviewTag recommendation={review.recommendation} />,
                     },
                     { key: "source", label: "来源", children: review.source || "—" },
-                    { key: "reason", label: "理由", children: review.reason || "—" },
+                    {
+                      key: "reason",
+                      label: "理由",
+                      children: localizeText(review.reason) || "—",
+                    },
                   ]}
                 />
                 {(review.doubts ?? []).length ? (
@@ -423,7 +636,7 @@ export default function CaseDetailPage({ caseId, onAudit }: Props) {
         width={720}
       >
         {askState?.loading ? (
-          <div className={styles.center}><Spin /></div>
+          <Skeleton active paragraph={{ rows: 4 }} />
         ) : askState?.error ? (
           <Alert type="error" showIcon message={askState.error} />
         ) : askState?.data ? (

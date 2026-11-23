@@ -86,7 +86,10 @@ class Tool:
 
 
 class ToolRegistry:
-    def __init__(self) -> None:
+    def __init__(self, allowed: frozenset[str] | None = None) -> None:
+        # allowed=None 表示不设限（测试/临时 registry 用）；
+        # 主链路由 build_registry() 显式传白名单，越权调用在工具层就被拒。
+        self.allowed = allowed
         self._tools: dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> Tool:
@@ -113,6 +116,9 @@ class ToolRegistry:
             tool = self.get(name)
         except ToolError as exc:
             return ToolResult(False, error=str(exc), ms=(time.perf_counter() - t0) * 1000)
+        if self.allowed is not None and name not in self.allowed:
+            return ToolResult(False, error=f"工具不在白名单内: {name}",
+                              ms=(time.perf_counter() - t0) * 1000)
         errs = validate_args(tool.schema, kwargs)
         if errs:
             return ToolResult(False, error="参数校验失败: " + "; ".join(errs),

@@ -2,7 +2,7 @@
 
 进口一般贸易报关单证的智能审核：四单一致性、申报要素、归类建议、监管证件，输出「可申报 / 可补正 / 需复核 / 不可申报」。
 
-> 状态：**W6.5 完成** —— 46 条规则 + RAG（检索评测 recall@3 100%）+ 引用链 + 多 Agent 复核 + MCP + 红队 + Judge + 成本/限流/幂等 + FastAPI/AntD 审核台 + **单证导入 / 追问 / 文本抽取 / Agent Skill / 向量表 / 异步 API / Docker / CI / 11 项指标门禁**；269 条测试全绿。
+> 状态：**W6.6 完成** —— 46 条规则 + RAG（检索评测 recall@3 100%）+ 引用链 + 多 Agent 复核 + MCP + 红队 + Judge + 成本/限流/幂等 + FastAPI/AntD 审核台 + **单证导入 / 追问 / 文本抽取 / Agent Skill / 向量表 / 异步 API / Docker / CI / 12 项指标门禁** + **Excel / 扫描件 OCR / Web 原始文件上传**；343 条测试全绿。
 > 交接入口：[`AGENTS.md`](AGENTS.md) → [`docs/00-project-context.md`](docs/00-project-context.md)
 
 ## 为什么做这个
@@ -23,7 +23,8 @@
 ![审核台](docs/images/w5-console.png)
 
 - 左侧审核单列表（筛选 / 新建审核 / 状态与结论标签 / 单票成本）；
-- 「导入单证」支持粘贴或上传 JSON，可载入示例；导入后自动编号并进入详情；
+- 「导入单证」支持粘贴/上传 JSON，也可直接上传 Excel / PDF / 扫描件图片，自动识别建单；
+- 导入后详情页有「原始单证」页签：逐文件/页的识别类型、置信度、缺字段、转人工提示；
 - 右侧单票详情：问题清单、五份单证、处理轨迹、复核与护栏；
 - `PENDING_APPROVAL` 时打开审批 Drawer，通过 / 退回都会写事件流与 trace；
 - 评测指标页展示准确率、召回、误报、引用覆盖、P95、单票成本与逐条结果。
@@ -55,9 +56,13 @@ make web-build            # 类型检查 + 构建到 web/dist
 ## Docker
 
 ```bash
-make docker-build         # docker build -t logistics-agent:latest .
+make docker-build         # docker build -t logistics-agent:latest .（默认含 Excel/PDF，不含 OCR）
 make docker-run           # 起容器，映射 8000，挂载 ./var
-make docker-up            # docker compose up --build
+make docker-up            # docker compose up --build（compose 默认 WITH_OCR=1，含扫描件 OCR）
+# 裸 docker build 要 OCR：
+docker build --build-arg WITH_OCR=1 -t logistics-agent:ocr .
+# compose 想省镜像体积、不要 OCR：
+WITH_OCR=0 docker compose up --build
 ```
 
 镜像多阶段构建：Node 负责 AntD 构建，Python 3.12-slim 只带运行时；非 root 用户、
@@ -99,11 +104,12 @@ scripts/ demo.py（一键演示）· gate.py（指标门禁）
 > Windows 没有 `make` 时，直接运行对应 `python` 命令即可；Makefile 只是快捷方式。
 
 ```bash
-make test        # 单元/集成测试（155 条）
-make eval        # 主评测 + 复核对照 + Judge + 红队 + 性能，生成 5 份报告
-make gate        # 9 项指标门禁
+make test        # 单元/集成测试（343 条，部分 PDF/OCR 用例按依赖 skip）
+make eval        # 主评测 + 复核对照 + Judge + 红队 + 性能 + 幻觉 + 模式 + 检索 + 影子 + 抽取层
+make gate        # 12 项指标门禁
 make ci          # test + eval + gate（CI 等价）
 make perf        # 串行 / 并发 10 的 P50/P95、吞吐、成本
+make extraction  # 抽取层：Excel / PDF / 扫描件字段准确率 + CER
 make demo-script # 终端跑 PASS/FIX/REVIEW/REJECT 四票
 make show ID=IMP-0019   # 看单条用例的规则明细
 
@@ -140,7 +146,8 @@ FDE 交付文档：
 | 复核过判观察 | **5 条**（验收线 ≥3），误报 0 → 0 |
 | LLM-as-Judge 一致率 | **100%** |
 | 红队拦截/降级 | **10/10**，`auto_change_hs` 0 次 |
-| 指标门禁 | **9/9** |
+| 指标门禁 | **12/12**（含抽取字段准确率 ≥ 90%） |
+| 抽取层字段准确率 | **100%**（Excel / 文字 PDF / 2 页扫描 / 5 页扫描四条路由，CER 0.000） |
 | Docker 镜像 | 构建通过，容器 health/审核接口正常 |
 | 规则数 / 语料 chunk | 44 / 64 |
 | 单票成本 | **¥0.0002**（mock，可配置单价） |
@@ -163,7 +170,11 @@ atelimit.py、case_id 幂等 |
 | 两种审核模式（scripted / react 证据补采） | 已实现 | harness/planner.py、evals/modes.py |
 | 追问（POST /cases/{id}/ask） | 已实现 | pplication/ask.py、UI「为什么？」按钮 |
 | 文本 → 结构化抽取 | 已实现（POC，非 OCR） | pplication/extract.py、POST /api/extract |
-| Agent Skill 产物 | 已实现 | skills/document-audit/SKILL.md + 加载器 |
+| Excel 单证导入（`route=table`） | 已实现 | src/ingest/excel.py、tests/test_ingest_excel.py；五 sheet 工作簿 → FIX + 仅 L2-13 |
+| 扫描件 OCR（`route=ocr`，可选依赖） | 已实现 | src/ingest/ocr.py + ocr_pdf.py（RapidOCR，`requirements-ocr.txt`）；2 页/5 页扫描件 → FIX + 仅 L2-13 |
+| Web 原始文件上传（`POST /api/ingest`） | 已实现 | multipart → 建单；FastAPI + 兜底服务都支持；详情页「原始单证」页签展示置信度/缺字段 |
+| 抽取层评测（字段准确率 / CER） | 已实现 | evals/extraction.py（四条路由 100% / 0.000），进 gate 第 12 项 |
+| Agent Skill 产物 | 已实现（默认接入说明文本） | skills/document-audit/SKILL.md + 加载器；`LOGIAGENT_SKILL=off` 可关，health 暴露 `skill{name,enabled}` |
 | 检索评测（recall@k / MRR） | 已实现 | evals/retrieval.py（93.3% / 100%） |
 | 增量索引 | 已实现 | 
 ag/store.py、python -m src.rag.reindex |
@@ -171,7 +182,7 @@ ag/store.py、python -m src.rag.reindex |
 ag/vectors.py、evals/vectors.py |
 | 幻觉指标 / 影子评测 / 告警 | 已实现 | evals/hallucination.py、shadow.py、scripts/alert.py |
 | 异步 API | 已实现 | dapters/fastapi_api.py、scripts/async_bench.py |
-| 扫描件 OCR | **未实现** | 无 OCR 依赖，只处理文本 |
+| MinerU OCR 后端（可选） | **未实现** | RapidOCR 已满足当前样本；MinerU 留接口，未接（GB 级依赖 / 许可证附加条件） |
 | pgvector / Milvus 等向量数据库 | **未实现** | 仅 sqlite 自建向量表 |
 | A2A / OAuth | **接口预留** | 文档与路由命名预留，未实现 |
 | 真实客户上线 | **未发生** | 仅内部试用，见 docs/08-adoption-log.md |

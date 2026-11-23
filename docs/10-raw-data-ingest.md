@@ -1,7 +1,7 @@
 # 10 · 原始数据接入（W7）交接与实施计划
 
-> 读法：先看第 2 节现状，再按第 4 节（Excel）开工；第 5 节是 OCR。
-> 新会话第一条消息：**「读 `AGENTS.md` 和 `docs/10-raw-data-ingest.md`，按第 4 节做 Excel 适配器。」**
+> 读法：第 2 节现状；第 4 节（Excel）与第 5 节（OCR）**均已完成**，实现记录见 4.7 / 5.6。
+> 新会话可先跑验收三件套，再按第 9 节决定下一步（真实脱敏样本评测 / MinerU 可选后端）。
 
 ## 1. 目标
 
@@ -22,9 +22,14 @@
 |---|---|---|
 | 类型检测 | Excel / 文字层 PDF / 扫描 PDF / 图片 → `route` | `src/ingest/detect.py` |
 | 文字层 PDF 抽取 | 五单标签表 + 明细正则 + 置信度 | `src/ingest/pdf_text.py` |
-| 端到端管线 | 文件 → 五单 JSON → `engine.audit()` | `src/ingest/pipeline.py` |
-| 合成样本 | 单件样本 + 五单成套 PDF | `examples/raw/`、`examples/raw/pdf/` |
-| 样本生成器 | 可复现生成全部样本 | `scripts/gen_synthetic_rawdocs.py` |
+| **Excel 抽取** | 表头同义词 + 合并单元格 + 明细停止 + 置信度（P0 已完成） | `src/ingest/excel.py` |
+| **OCR 抽取** | 扫描 PDF/图片 → 文本块 → 表格按坐标切列（P1 已完成） | `src/ingest/ocr.py`、`src/ingest/ocr_pdf.py` |
+| 端到端管线 | 文件 → 五单 JSON → `engine.audit()`（`table` / `text` / `ocr` 三路） | `src/ingest/pipeline.py` |
+| **HTTP 上传** | `POST /api/ingest`（multipart）→ 建审核单；`GET /api/cases/{id}/ingest` 回查 | `web_api.py`、`fastapi_api.py`、`fallback_server.py` |
+| **Web 入口** | 「导入单证」新增原始文件页签；详情页「原始单证」展示置信度/缺字段 | `web/src/components/ImportCaseModal.tsx`、`CaseDetailPage.tsx` |
+| **Docker** | 默认装 `requirements-ingest.txt`；compose 默认 `WITH_OCR=1`（含 RapidOCR），裸 build 用 `--build-arg WITH_OCR=1` | `Dockerfile`、`docker-compose.yml` |
+| 合成样本 | 单件样本 + 五单 PDF + 五单 Excel + 2 页/5 页扫描件 | `examples/raw/`、`examples/raw/pdf/` |
+| 样本生成器 | 可复现生成全部样本（含五 sheet 工作簿与五页扫描件） | `scripts/gen_synthetic_rawdocs.py` |
 
 ### 实测
 
@@ -37,20 +42,29 @@ issue_count = 1
 issue = L2-13（报关单总价 9975 vs 发票总额 10000）
 ```
 
-与 `REAL-002-amount-mismatch-FIX.json` 的期望一致。
+一个 Excel 工作簿五个 sheet（`examples/raw/合成五单-2026-0901.xlsx`）→ 同上：
+`missing_docs=[]`、`FIX`、仅 `L2-13`；「xlsx 发票 + 其余四份 PDF」混跑结果也一致。
+
+扫描件（`合成扫描件-多页.pdf`：装箱单 + 报关单）+ 合同/发票/提单三份文字层 PDF →
+五单齐套、`FIX`、仅 `L2-13`；五页扫描件 `合成扫描件-五单.pdf` 单独跑也是 `FIX` + 仅 `L2-13`。
+
+HTTP 上传（`POST /api/ingest`）用同一批文件建单：Excel 发票单独上传 → 建单成功（缺单转 REVIEW）；
+xlsx 发票 + 四份 PDF 混传 → 五单齐套、`FIX`、仅 `L2-13`。
 
 ### 验证
 
 | 项 | 结果 |
 |---|---|
-| 单元测试 | **303 条 OK**（6 条 PDF 用例需 `pypdf`，未装则 skip） |
-| `scripts/gate.py` | **11/11** |
-| `scripts/baseline_check.py` | **未发现退化** |
+| 单元测试 | **343 条 OK**（缺 `pypdf` / OCR 依赖时相关用例 skip） |
+| `scripts/gate.py` | **12/12**（第 12 项：抽取字段准确率 ≥ 90%） |
+| `scripts/baseline_check.py` | **未发现退化**（含抽取字段准确率） |
+| `evals/extraction.py` | 四条路由字段准确率 **100%**，字段 CER 0.000 |
+| `pnpm build`（AntD） | 通过 |
 
-### 未接
+### 未接 / 未做
 
-- **Excel**（`route=table`）——本阶段 P0；
-- **OCR**（`route=ocr`，扫描 PDF / 图片）——P1。
+- **MinerU 后端**（可选，P1.3）——RapidOCR 已够用，MinerU 留接口位置；
+- **真实脱敏扫描件评测**——当前只有合成样本（含旋转/噪点），真实版式需另测。
 
 ## 3. 关键设计原则
 
@@ -84,11 +98,11 @@ issue = L2-13（报关单总价 9975 vs 发票总额 10000）
 
 ### 4.4 验收标准
 
-- [ ] `合成发票.xlsx` → `invoice_no / total_amount / items[]` 全部正确；
-- [ ] 表头**换序**仍能抽（用同义词映射而非列号）；
-- [ ] `pipeline` 跑「xlsx 发票 + 其余四份 PDF」→ `FIX` + 仅 `L2-13`；
-- [ ] 新增测试 ≥ 8 条；全量测试、gate、baseline 全绿；
-- [ ] `examples/raw/README.md` 更新用法。
+- [x] `合成发票.xlsx` → `invoice_no / total_amount / items[]` 全部正确；
+- [x] 表头**换序**仍能抽（用同义词映射而非列号）；
+- [x] `pipeline` 跑「xlsx 发票 + 其余四份 PDF」→ `FIX` + 仅 `L2-13`；
+- [x] 新增测试 ≥ 8 条；全量测试、gate、baseline 全绿；
+- [x] `examples/raw/README.md` 更新用法。
 
 ### 4.5 风险
 
@@ -107,56 +121,104 @@ issue = L2-13（报关单总价 9975 vs 发票总额 10000）
 4. `pipeline.py` 接入 `route=table`；
 5. 端到端验证 + 更新文档。
 
-## 5. P1：OCR 适配器（Excel 之后再动）
+### 4.7 实现记录（2026-11-13，P0 完成）
+
+| 项 | 落地 |
+|---|---|
+| 抽取器 | `src/ingest/excel.py`：`extract` / `extract_workbook` / `extract_sheet` |
+| 单证类型 | 标题关键词打分 + 标签命中数；报关单/发票/装箱单/提单/合同互不误判 |
+| 表头 | `LABELS`（单头字段）与 `ITEM_HEADERS`（明细列）两组同义词，长标签优先 |
+| 合并单元格 | `ws.merged_cells.ranges` 展开，整个区域取左上角值 |
+| 数值/日期 | 全角转半角、去千分位/货币符号；日期兼容 `datetime` 与 Excel 序列号 |
+| 明细 | 从表头行向下读，遇到合计/折扣/佣金/特许权/备注等停止 |
+| 置信度 | 必填缺失、`数量×单价≠金额`、公式无缓存值 → 降置信并写 `checks` |
+| 多 sheet | 一个工作簿逐 sheet 判类型，可同时产出多份单证 |
+| 样本 | 新增 `examples/raw/合成五单-2026-0901.xlsx`（五 sheet，生成器可复现） |
+| 测试 | `tests/test_ingest_excel.py` 17 条（1 条需 `pypdf`） |
+
+**已知取舍**：`openpyxl` 是可选依赖（未装时管线提示安装，不中断）；
+`.xls` 旧格式仍按 `detect.py` 提示另存 `.xlsx`；真实表头需要往同义词表里补，
+补不动时靠低置信转人工，不硬编码列号。
+
+## 5. P1：OCR 适配器（已完成，2026-11-13）
 
 ### 5.1 目标
 
-`src/ingest/ocr.py`：扫描 PDF / 图片 → 文本或块 → 复用 `pdf_text` 的字段解析（或专用解析）。
+`src/ingest/ocr.py` + `src/ingest/ocr_pdf.py`：扫描 PDF / 图片 → 文本块 → 复用 `pdf_text`
+的字段解析；明细表用 OCR 块坐标切列，输出与 PDF/Excel 同一套字段名。
 
-### 5.2 方案候选（开工前拍板）
+### 5.2 方案拍板
 
-| 方案 | 优点 | 代价 |
-|---|---|---|
-| **MinerU**（推荐） | 扫描 PDF 原生支持；输出 Markdown/JSON + `page/block` locator；与文字层同一入口 | 模型依赖重、安装包大、CPU 慢 |
-| PaddleOCR / RapidOCR | 轻、可控 | 需自建版面/表格结构识别 |
-| 视觉大模型 | 上手快 | 不可复现、成本高，审计不接受作唯一路径 |
+| 方案 | 结论 |
+|---|---|
+| **RapidOCR** | **已采用（默认）**：pip 安装、自带中英模型、离线、CPU 可跑 |
+| MinerU | 接受但暂不接（P1.3）：GB 级依赖 + 许可证附加条件；接口已留 |
+| PaddleOCR | 备选，不默认 |
+| Tesseract | 不采用：需要外部 exe/语言包，pip 不可复现 |
+| 视觉大模型 | 不作唯一路径（不可复现/成本高） |
 
-### 5.3 设计要点
+### 5.3 设计要点（落地版）
 
-- `OcrPort` 接口 + **默认 mock**（无 OCR 依赖也能跑测试）；
-- 预处理：200–300 DPI、纠偏、去噪、红章通道分离、去空白页；
-- 置信度 + 交叉校验（数量×单价≈金额、总额≈明细合计）→ 低置信转人工；
-- `provenance`：文件名 + 页码 + 块号（MinerU 的 locator 可直接用）。
+- `OcrPort` 协议 + **默认 mock**：`LOGIAGENT_OCR=auto|mock|rapidocr`，无依赖也能跑测试；
+- 取页图：扫描 PDF 用 `pypdf` 读嵌入图（不需要 PyMuPDF）；文字层页直接用文本；
+- 预处理：灰度 + 小图放大；**不做中值滤波**（实测会把 8–10px 小字糊掉）；
+- 文本归一：按行重排块 → 一行多标签拆成「一行一个标签」→ 复用 `parse_document`；
+- 明细表：用表头块坐标切列，不靠正则猜列序；合计行回填 `total_amount` / `qty_total`；
+- 置信度：`min(解析置信度, OCR 平均置信度)`；必填缺失、行金额不符、总价缺失 → 转人工；
+- 代码表纠错：贸易方式/币制/成交方式做最近邻纠正并留痕（如「般贸易」→「一般贸易」）；
+- `locators`：字段 → 页码 + bbox + 块文本 + 置信度（不进 `docs`，引擎零改动）。
 
 ### 5.4 验收标准
 
-- [ ] `examples/raw/合成扫描件-多页.pdf` → 五单字段；
-- [ ] 字段级准确率 + CER（字符错误率）指标；
-- [ ] 无 OCR 依赖时测试 skip，CI 可装；
-- [ ] 与文字层 PDF 走同一套字段名 / 同一套审核。
+- [x] `examples/raw/合成扫描件-多页.pdf` → 装箱单 + 报关单字段；
+- [x] 五页扫描件 `合成扫描件-五单.pdf` → 五单 → `FIX` + 仅 `L2-13`；
+- [x] 字段级准确率 + 字段 CER 指标（`evals/extraction.py`，四条路由均 100% / 0.000）；
+- [x] 无 OCR 依赖时测试 skip，`requirements-ocr.txt` 可装；
+- [x] 与文字层 PDF 走同一套字段名 / 同一套审核。
 
 ### 5.5 风险
 
 - 印章、手写、背面透印、多页联单、倾斜；
 - MinerU 许可证是 Apache 2.0 + 附加条件，**商用前要确认**；
-- 离线包体积可能从 MB 级涨到 GB 级。
+- 离线包体积：RapidOCR 几十 MB 级；MinerU 会到 GB 级；
+- 合成样本不能代表真实版式，真实脱敏样本必须另测。
+
+### 5.6 实现记录（2026-11-13）
+
+| 项 | 落地 |
+|---|---|
+| 端口 | `src/ingest/ocr.py`：`OcrResult` / `OcrBlock` / `OcrPort` / `MockOcr` / `RapidOcrEngine` |
+| 页面 | `src/ingest/ocr_pdf.py`：取页图、预处理、逐页解析、表头坐标切列、locator |
+| 管线 | `pipeline.py` 支持 `route=ocr`，逐页抽取并按置信度合并 |
+| 依赖 | `requirements-ocr.txt`（`rapidocr_onnxruntime` + `onnxruntime`） |
+| 样本 | `合成扫描件-多页.pdf`（2 页）、`合成扫描件-五单.pdf`（5 页），生成器可复现 |
+| 测试 | `tests/test_ingest_ocr.py` 15 条（真实 OCR 用例无依赖时 skip） |
+| 评测 | `evals/extraction.py`：Excel / 文字 PDF / 2 页扫描 / 5 页扫描 → 字段准确率 100%、CER 0.000 |
+| 产品化 | `POST /api/ingest` + Web 上传页签 + 详情「原始单证」页签；Docker 默认装 ingest 依赖、OCR 可选构建 |
+| 门禁 | extraction 进 gate 第 12 项（≥90%）与 baseline 回归 |
+
+**已知取舍**：OCR 平均置信度低于 0.6、必填缺失、行金额不符或总价缺失时 `needs_human=true`；
+识别文本里的表头残留会做“无数值就丢弃”，不静默当字段值。
 
 ## 6. 评测（两层都要）
 
 | 层 | 指标 | 建议位置 |
 |---|---|---|
-| 抽取层 | 字段准确率、置信度校准、转人工率 | 新增 `evals/extraction.py` |
+| 抽取层 | 字段准确率、置信度校准、转人工率 | `evals/extraction.py`（已实现，四条路由 100%） |
 | 端到端 | 结论一致率、`rule_id` 集合一致 | 复用 `evals/runner.py` 口径 |
 
 **不要只看端到端**：OCR 错一个 0 导致结论变 REVIEW，必须能分清是"抽错"还是"判错"。
+`evals/extraction.py` 已进 `gate` 第 12 项（字段准确率 ≥ 90%，且至少 Excel + 文字 PDF 两条路由），
+并纳入 `baseline_check` 回归；OCR 依赖缺失时对应路由 skip，但不会让门禁"假绿"。
 
 ## 7. 环境与命令（Windows 坑）
 
 ### Python
 
-- 系统 `python`：**没有** `pypdf`；
-- bundled Python（有 `openpyxl` / `Pillow` / `pypdf` 7.0）：
+- 系统 `python`（当前已装）：`pypdf` 7.0 + `openpyxl` + `Pillow` + `rapidocr_onnxruntime`；
+- bundled Python（有 `openpyxl` / `Pillow` / `pypdf` 7.0，**没有** RapidOCR）：
   `C:\Users\HHK2023\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe`
+- OCR 依赖按需安装：`pip install -r requirements-ocr.txt`。
 
 ### Edge（无头 PDF / 截图）
 
@@ -171,20 +233,50 @@ issue = L2-13（报关单总价 9975 vs 发票总额 10000）
 ### 常用命令
 
 ```powershell
-# 生成全部合成样本（4 个单件 + 五单成套 PDF）
+# 生成全部合成样本（单件 + 五单 PDF/Excel + 2 页/5 页扫描件）
 python scripts/gen_synthetic_rawdocs.py
 
 # 类型检测
 python -m src.ingest.detect examples/raw/pdf/*.pdf
 
-# 端到端（需要 pypdf）
+# Excel 抽取（只需要 openpyxl）
+python -m src.ingest.excel examples/raw/合成发票-INV-2026-0901.xlsx
+
+# OCR 抽取（需要 pypdf + requirements-ocr.txt）
+python -m src.ingest.ocr_pdf examples/raw/合成扫描件-多页.pdf
+
+# 端到端
 python -m src.ingest.pipeline examples/raw/pdf/*.pdf
+python -m src.ingest.pipeline examples/raw/合成五单-2026-0901.xlsx
+python -m src.ingest.pipeline examples/raw/合成扫描件-五单.pdf
+python -m src.ingest.pipeline examples/raw/合成扫描件-多页.pdf `
+  examples/raw/pdf/合同-HT-2026-0901.pdf `
+  examples/raw/pdf/发票-INV-2026-0901.pdf `
+  examples/raw/pdf/提单-SYN-2026-0901.pdf
+
+# 抽取层评测（字段准确率 + CER）
+python evals/extraction.py
+
+# Web 上传（起服务后页面上传，或直接 curl）
+make api                                    # 或 make demo（无依赖兜底）
+curl.exe -F "files=@examples/raw/合成发票-INV-2026-0901.xlsx" ^
+         -F "case_id=UPLOAD-001" http://127.0.0.1:8000/api/ingest
+curl.exe http://127.0.0.1:8000/api/cases/UPLOAD-001/ingest
+
+# Docker：默认含 Excel/PDF 依赖；compose 默认 WITH_OCR=1（含扫描件 OCR）
+docker compose up --build
+# 裸 docker build 要 OCR 时显式加参数；compose 想省体积用 WITH_OCR=0
+docker build --build-arg WITH_OCR=1 -t logistics-agent:ocr .
+WITH_OCR=0 docker compose up --build
 
 # 验收三件套
 python -m unittest discover -s tests
 python scripts/gate.py
 python scripts/baseline_check.py
 ```
+
+上传后留档位置：`var/uploads/<case_id>/`（原始文件）、`var/docs/<case_id>.ingest.json`
+（逐文件/页识别记录，含置信度/缺字段/checks）。
 
 ## 8. 硬约束（继承 `AGENTS.md`）
 
@@ -194,13 +286,22 @@ python scripts/baseline_check.py
 - 归类只给 6 位建议，不自动改判；
 - **数据全合成**，不引入真实企业名/单号/个人信息；真实样本必须脱敏。
 
-## 9. 待确认（开工前问用户或自行决定）
+## 9. 已拍板 / 仍待定
 
-1. OCR 依赖可以装吗？离线包多大能接受？
-2. 有没有真实**脱敏**样本？没有就用合成数据先跑通。
-3. Excel 需要支持 `.xls` 旧格式吗？（建议先不做，提示另存）
-4. 抽取出错时的兜底顺序：规则 → LLM → 人工？还是直接拒收？
-5. `evals/extraction.py` 是否进 `gate`（建议进，但先跑通再加）。
+**已拍板（2026-11-13）**
+
+1. OCR 依赖已装：`requirements-ocr.txt`（RapidOCR + onnxruntime，几十 MB 级）；MinerU 接受但暂不接。
+2. 没有真实**脱敏**样本：先用合成样本（含旋转/噪点/五页扫描）跑通，真实版式另测。
+3. Excel 不支持 `.xls`：提示另存 `.xlsx`。
+4. 抽取出错兜底：**规则 + 交叉校验 → 低置信转人工**，不接 LLM 猜字段、不静默放行。
+5. `evals/extraction.py` 已实现并进 gate（字段准确率 ≥ 90%）+ baseline；OCR 路由缺依赖时 skip，
+   但要求至少 Excel + 文字 PDF 两条路由。
+
+**仍待定**
+
+- 真实脱敏扫描件（最好 200–300 DPI）与字段准确率/转人工率目标；
+- MinerU 是否值得为复杂表格引入（许可证、包体、CPU 成本）；
+- 红章/手写/多栏等难样本的专项处理优先级。
 
 ## 10. 与既有文档的关系
 

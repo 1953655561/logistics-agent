@@ -22,6 +22,7 @@ from src.harness.memory import MemoryStore                   # noqa: E402
 from src.harness.planner import build_planner                # noqa: E402
 from src.harness.ratelimit import TokenBucket                # noqa: E402
 from src.harness.router import default_router                # noqa: E402
+from src.harness.skills import load_default_skill            # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 VAR = os.path.join(ROOT, "var")
@@ -44,7 +45,7 @@ def _build_docs(case_id: str) -> dict:
 
 def build_web_api(offline: bool = True, review: bool = True,
                   ratelimit: bool = True, memory: bool = True,
-                  mode: str = "scripted") -> WebApi:
+                  mode: str = "scripted", skill: bool = True) -> WebApi:
     os.makedirs(VAR, exist_ok=True)
     repo = SqliteRepo(os.path.join(VAR, "audit.db"))
     router = default_router(offline=offline)
@@ -58,6 +59,7 @@ def build_web_api(offline: bool = True, review: bool = True,
         rate_limiter=TokenBucket(60) if ratelimit else None,
         memory=store, mode=mode,
         planner=build_planner(mode, router.llm("ask")),
+        skill=load_default_skill() if skill else None,
     )
     return WebApi(
         repo, service, trace_dir=os.path.join(VAR, "traces"),

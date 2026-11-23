@@ -1,4 +1,4 @@
-"""兜底 HTTP 服务测试：静态页 + JSON API（无第三方依赖）。"""
+"""兜底 HTTP 服务测试：静态页 + JSON API + multipart 上传（无第三方依赖）。"""
 import json
 import os
 import sys
@@ -7,6 +7,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -14,6 +15,15 @@ from src.app.fallback_server import make_server                 # noqa: E402
 from tests.test_web_api import make_web                         # noqa: E402
 from data.synth.generator import build_case                     # noqa: E402
 from data.synth.scenarios import CASES                          # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+XLSX = ROOT / "examples" / "raw" / "合成发票-INV-2026-0901.xlsx"
+
+try:
+    import openpyxl  # noqa: F401
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
 
 
 class TestFallbackServer(unittest.TestCase):
@@ -78,6 +88,32 @@ class TestFallbackServer(unittest.TestCase):
         self.assertEqual(body["verdict"], "FIX")
         _, docs_body = self._get("/api/cases/FB-IMPORT-1/docs")
         self.assertIn("invoice", json.loads(docs_body)["docs"])
+
+    @unittest.skipUnless(HAS_OPENPYXL and XLSX.exists(), "需要 openpyxl 与 Excel 样本")
+    def test_ingest_multipart(self):
+        boundary = "----DSHBoundary7MA4YWxk"
+        head = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="case_id"\r\n\r\n'
+            "FB-ING-1\r\n"
+        ).encode("utf-8")
+        file_head = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="files"; filename="发票.xlsx"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8")
+        body = head + file_head + XLSX.read_bytes() + \
+            f"\r\n--{boundary}--\r\n".encode("utf-8")
+        req = urllib.request.Request(
+            self.base + "/api/ingest", data=body, method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with urllib.request.urlopen(req, timeout=30) as res:
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode("utf-8"))
+        self.assertEqual(data["case_id"], "FB-ING-1")
+        self.assertEqual(data["ingest"]["docs"], ["invoice"])
+        _, meta = self._get("/api/cases/FB-ING-1/ingest")
+        self.assertTrue(json.loads(meta)["available"])
 
     def test_404(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:

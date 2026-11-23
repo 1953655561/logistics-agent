@@ -194,14 +194,18 @@ def _postprocess(dtype: str, fields: dict) -> dict:
     return fields
 
 
-def extract(path) -> dict:
-    """抽取一份文字层 PDF，返回 {doc_type, fields, missing, confidence, needs_human}。"""
-    p = Path(path)
-    text = _read_pdf_text(p)
+def parse_document(text: str, source: str = "") -> dict:
+    """文本 → 五单字段。
+
+    文字层 PDF 与 OCR 共用这一层：OCR 只要把识别结果拼成「一行一个标签」的文本，
+    就能拿到与 PDF 完全相同的字段名与结构，审核引擎零改动。
+    """
+    text = str(text or "")
+    p = Path(source) if source else None
     dtype = detect_doc_type(text)
     if dtype is None:
-        return {"path": str(p), "doc_type": None, "fields": {}, "items": 0,
-                "missing": [], "confidence": 0.0, "needs_human": True,
+        return {"path": str(p) if p else "", "doc_type": None, "fields": {},
+                "items": 0, "missing": [], "confidence": 0.0, "needs_human": True,
                 "text_chars": len(text)}
 
     fields: dict = {}
@@ -224,7 +228,7 @@ def extract(path) -> dict:
     missing = [f for f in REQUIRED[dtype] if not fields.get(f)]
     confidence = round(1 - len(missing) / max(len(REQUIRED[dtype]), 1), 3)
     return {
-        "path": str(p),
+        "path": str(p) if p else "",
         "doc_type": dtype,
         "fields": fields,
         "items": len(items),
@@ -233,3 +237,9 @@ def extract(path) -> dict:
         "needs_human": bool(missing),
         "text_chars": len(text),
     }
+
+
+def extract(path) -> dict:
+    """抽取一份文字层 PDF，返回 {doc_type, fields, missing, confidence, needs_human}。"""
+    p = Path(path)
+    return parse_document(_read_pdf_text(p), source=str(p))

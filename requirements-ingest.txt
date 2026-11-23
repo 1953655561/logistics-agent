@@ -1,0 +1,6 @@
+# 原始数据解析默认依赖（Excel / 文字层 PDF / 图片读取）
+#   pip install -r requirements-ingest.txt
+# 扫描件 OCR 还要装 requirements-ocr.txt。
+openpyxl>=3.1
+pypdf>=4.0
+Pillow>=10.0

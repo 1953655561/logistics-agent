@@ -20,7 +20,7 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Unit / integration tests
         run: make test
-      - name: Main eval + review + judge + redteam + perf
+      - name: Main eval + review + judge + redteam + perf + extraction
         run: make eval
       - name: Metric gate
         run: make gate
@@ -45,9 +45,14 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "24.22"
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      - name: Verify Node version
+        run: |
+          node -v
+          printf '%s\n%s\n' "24.22.1" "$(node -v | sed 's/^v//')" | sort -V -C \
+            || { echo "Node too old (<24.22.1)"; exit 1; }
       - name: Install frontend deps
         working-directory: web
         run: pnpm install --frozen-lockfile

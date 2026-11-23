@@ -7,13 +7,13 @@ from __future__ import annotations
 import asyncio
 import os
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, File, Form, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..application.web_api import WebApi, WebApiError
+from ..application.web_api import MAX_UPLOAD_FILE_BYTES, WebApi, WebApiError
 
 
 # ---------------- DTO ----------------
@@ -176,6 +176,11 @@ class ImportRequest(BaseModel):
     docs: dict
 
 
+class IngestOut(CaseDetail):
+    """原始文件解析结果 + 审核单详情。"""
+    ingest: dict = Field(default_factory=dict)
+
+
 class ApprovalRequest(BaseModel):
     approved: bool
     comment: str = ""
@@ -230,6 +235,23 @@ def create_app(web: WebApi, static_dir: str | None = None) -> FastAPI:
     @app.post("/api/cases/import", response_model=CaseDetail)
     async def import_case(body: ImportRequest):
         return await asyncio.to_thread(web.import_case, body.case_id, body.docs)
+
+    @app.post("/api/ingest", response_model=IngestOut)
+    async def ingest(files: list[UploadFile] = File(...), case_id: str = Form("")):
+        payload = []
+        for upload in files:
+            size = getattr(upload, "size", None)
+            if size and size > MAX_UPLOAD_FILE_BYTES:
+                raise WebApiError(
+                    f"{upload.filename}: 超过 {MAX_UPLOAD_FILE_BYTES // 1024 // 1024}MB",
+                    status=413)
+            payload.append({"filename": upload.filename or "upload.bin",
+                            "content": await upload.read()})
+        return await asyncio.to_thread(web.ingest_files, payload, case_id)
+
+    @app.get("/api/cases/{case_id}/ingest", response_model=dict)
+    async def get_ingest(case_id: str):
+        return await asyncio.to_thread(web.get_ingest, case_id)
 
     @app.get("/api/cases/{case_id}", response_model=CaseDetail)
     async def get_case(case_id: str):

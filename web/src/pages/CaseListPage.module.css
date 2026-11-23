@@ -22,3 +22,16 @@
 .rowActive :global(td) {
   background: #e8efff !important;
 }
+
+/* P1：搜索 + 状态筛选 */
+.filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.search {
+  width: 220px;
+}

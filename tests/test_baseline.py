@@ -73,7 +73,7 @@ class TestSnapshotShape(unittest.TestCase):
         for key in ("eval", "agent", "perf", "redteam", "gate",
                     "hand_doc", "clean_doc", "tests"):
             self.assertIn(key, data)
-        self.assertEqual(len(data["gate"]), 11)
+        self.assertEqual(len(data["gate"]), 12)
         self.assertGreater(data["hand_doc"]["issue_count"], 0)
 
 

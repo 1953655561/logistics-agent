@@ -6,11 +6,13 @@ import json
 from ..common import get as get_path
 from ..engine import audit
 from ..rag.retriever import default_retriever
+from ..harness.guardrails import ALLOWED_TOOLS
 from ..harness.tools import Tool, ToolRegistry
 
 
 def build_registry(docs: dict) -> ToolRegistry:
-    reg = ToolRegistry()
+    # 工具白名单在工具层生效：即使有人往 registry 里多塞工具，越权调用也会被拒。
+    reg = ToolRegistry(allowed=ALLOWED_TOOLS)
 
     def doc_get(doc: str, path: str):
         if doc not in docs:

@@ -1,8 +1,9 @@
-"""FastAPI 适配器测试：路由、DTO、审批、静态托管。"""
+"""FastAPI 适配器测试：路由、DTO、审批、静态托管、原始文件上传。"""
 import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,6 +19,15 @@ except ImportError:          # 未安装 fastapi/httpx，跳过适配器测试
 from tests.test_web_api import make_web                         # noqa: E402
 from data.synth.generator import build_case                     # noqa: E402
 from data.synth.scenarios import CASES                          # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+XLSX = ROOT / "examples" / "raw" / "合成发票-INV-2026-0901.xlsx"
+
+try:
+    import openpyxl  # noqa: F401
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
 
 
 @unittest.skipUnless(HAS_FASTAPI, "需要 fastapi/httpx")
@@ -100,6 +110,34 @@ class TestFastApi(unittest.TestCase):
         self.assertIn("审核台", res.text)
         # API 路由在静态托管下仍然可用
         self.assertEqual(client.get("/api/health").json()["status"], "ok")
+
+    @unittest.skipUnless(HAS_OPENPYXL and XLSX.exists(), "需要 openpyxl 与 Excel 样本")
+    def test_ingest_upload(self):
+        res = self.client.post(
+            "/api/ingest",
+            files={"files": ("发票.xlsx", XLSX.read_bytes(),
+                             "application/vnd.openxmlformats-officedocument."
+                             "spreadsheetml.sheet")},
+            data={"case_id": "API-ING-1"},
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["case_id"], "API-ING-1")
+        self.assertEqual(body["ingest"]["docs"], ["invoice"])
+        self.assertEqual(body["ingest"]["files"][0]["doc_type"], "invoice")
+        meta = self.client.get("/api/cases/API-ING-1/ingest").json()
+        self.assertTrue(meta["available"])
+        self.assertEqual(meta["files"][0]["filename"], "发票.xlsx")
+
+    def test_ingest_rejects_bad_extension(self):
+        res = self.client.post(
+            "/api/ingest",
+            files={"files": ("旧单.xls", b"x", "application/vnd.ms-excel")},
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("xlsx", res.json()["detail"])
+        missing = self.client.post("/api/ingest")
+        self.assertEqual(missing.status_code, 422)
 
 
 if __name__ == "__main__":

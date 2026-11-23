@@ -1,6 +1,10 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # compose 默认带 OCR；想省镜像体积可 `WITH_OCR=0 docker compose up --build`
+        WITH_OCR: ${WITH_OCR:-1}
     image: logistics-agent:latest
     ports:
       - "8000:8000"

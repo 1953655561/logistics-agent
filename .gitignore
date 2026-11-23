@@ -12,6 +12,7 @@ evals/report/shadow.json
 evals/report/hallucination.json
 evals/report/perf.json
 evals/report/redteam.json
+evals/report/extraction.json
 web/node_modules/
 web/dist/
 web/openapi.json

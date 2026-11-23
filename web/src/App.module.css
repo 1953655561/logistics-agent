@@ -13,6 +13,11 @@
   background: #0f172a;
   gap: 16px;
   flex-wrap: wrap;
+  /* P1：顶部栏吸顶，滚动看长问题时仍能切视图/看模型状态 */
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .logoMark {

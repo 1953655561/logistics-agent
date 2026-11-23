@@ -1,5 +1,5 @@
 # ---------- 1) 前端构建 ----------
-FROM node:24-alpine AS web
+FROM node:24.22-alpine AS web
 WORKDIR /app/web
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -11,6 +11,7 @@ RUN pnpm build
 
 # ---------- 2) Python 运行时 ----------
 FROM python:3.12-slim AS runtime
+ARG WITH_OCR=0
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
@@ -18,8 +19,12 @@ WORKDIR /app
 
 RUN adduser --disabled-password --gecos "" appuser
 
-COPY requirements-web.txt ./
-RUN pip install --no-cache-dir -r requirements-web.txt
+COPY requirements-web.txt requirements-ingest.txt requirements-ocr.txt ./
+# 默认装 Web + Excel/PDF 解析依赖；WITH_OCR=1 才装 RapidOCR（几十 MB）
+RUN pip install --no-cache-dir -r requirements-web.txt -r requirements-ingest.txt \
+    && if [ "$WITH_OCR" = "1" ]; then \
+         pip install --no-cache-dir -r requirements-ocr.txt; \
+       fi
 
 COPY src ./src
 COPY data ./data

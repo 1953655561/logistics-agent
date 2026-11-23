@@ -43,10 +43,13 @@
 **做**
 - 进口一般贸易（不做加工贸易、不做跨境电商 9610/1210 清单）
 - 输入是**结构化 JSON**（合同、发票、装箱单、提单、报关单草单）
+- **原始文件接入（W7 经用户确认追加）**：Excel / 文字层 PDF / 扫描件 OCR → 五单 JSON；
+  Web 审核台可直接上传原始文件并建单
 - 四层校验 + 四分类结论 + 人工审批门
 
 **不做（明确写出来，防范围蔓延）**
-- OCR / PDF / 图片解析（定位为“已有能力”，我们只消费解析结果）
+- 真实扫描采集设备、专业 OCR 训练、印章/手写专项识别（RapidOCR 兜底，低置信转人工）
+- 重型 OCR 后端 MinerU（接受其许可证与包体，但暂未接入）
 - 自动申报（不碰单一窗口/海关系统，仅输出审核意见）
 - 自动改判 HS 编码（只给 6 位建议）
 - 真实客户数据
@@ -139,6 +142,7 @@ logistics-agent/
 | **W4.5** | **补洞包**：多 Agent 复核 · MCP · 红队与注入防护 · LLM-as-Judge · 成本/限流/幂等 | ✅ 完成：5 项全交付，120 条测试全绿 |
 | W5 | Web 审核台（AntD）+ 评测调优 | ✅ 完成：FastAPI + WebApi + AntD 审核台 + 无构建兜底页 + 性能评测；143 条测试 |
 | W6 | Docker、CI、文档、演示脚本、面试问答卡 | ✅ 完成：多阶段镜像 + compose + GitHub Actions + 指标门禁 + 使用手册/演示脚本/面试卡 |
+| **W7** | 原始数据接入：Excel / 文字层 PDF / 扫描件 OCR → 五单 JSON | ✅ 完成：`src/ingest/` 三路 + `/api/ingest` 上传 + Docker 默认解析依赖 + 抽取层门禁 |
 
 **W5 实测**：`make test` → **143 条全绿**；`make perf` → 并发 10 的 P95 约 **80ms**、单票成本 **¥0.0002**；
 `make demo` 不装任何 Web 依赖即可起兜底审核台。
@@ -417,7 +421,7 @@ Docker 首次构建需要能拉取基础镜像与依赖。
 **没修的（别误以为权限补齐了）**：仍无 RBAC / 多租户 / OAuth；白名单只约束"工具名"，
 不约束参数级权限；Skill 仍只影响说明文本，不参与判定。
 
-### W7 原始数据接入（进行中，2026-11-13）
+### W7 原始数据接入（已完成，2026-11-13）
 
 用户提出：真实输入是 **Excel + 纸质扫描 PDF**，项目目前只能吃结构化 JSON。决定**先做 Excel（确定性最高）、再做 OCR**。
 
@@ -425,13 +429,19 @@ Docker 首次构建需要能拉取基础镜像与依赖。
 |---|---|
 | 类型检测 `src/ingest/detect.py` | 四类样本判对；无 `pypdf` 时用 PDF 字节特征兜底 |
 | 文字层 PDF 抽取 `src/ingest/pdf_text.py` | 五单标签表 + 明细正则 + 置信度 |
-| 端到端管线 `src/ingest/pipeline.py` | 五份 PDF → `FIX`，仅 `L2-13`（9975 vs 10000） |
-| 合成样本 | `examples/raw/`（4 个单件）+ `examples/raw/pdf/`（五单成套），生成器可复现 |
+| **Excel 抽取 `src/ingest/excel.py`** | 表头同义词 + 合并单元格 + 明细停止 + 置信度；表头换序仍能抽 |
+| **OCR 抽取 `src/ingest/ocr.py` + `ocr_pdf.py`** | RapidOCR 端口 + mock 兜底；扫描 PDF 取嵌入图、按块坐标切表、代码表纠错、locator |
+| 端到端管线 `src/ingest/pipeline.py` | 五份 PDF / 五 sheet Excel / 2 页扫描 + 三份 PDF / 五页扫描 → 均 `FIX` + 仅 `L2-13` |
+| **HTTP / Web 上传** | `POST /api/ingest`（multipart）→ 建审核单；FastAPI 与无依赖兜底服务都支持；详情页「原始单证」页签展示置信度/缺字段 |
+| **Docker** | 默认装 `requirements-ingest.txt`（Excel/PDF/图片）；`docker compose` 默认 `WITH_OCR=1`（含 RapidOCR），裸 `docker build` 需 `--build-arg WITH_OCR=1` |
+| 合成样本 | 单件 + 五单 PDF + `合成五单-2026-0901.xlsx` + 2 页/5 页扫描件 |
+| 抽取层评测 `evals/extraction.py` | 四条路由字段准确率 100%、字段 CER 0.000；已进 gate 第 12 项 |
 
-实测：测试 **283 → 303**（6 条 PDF 用例需 `pypdf`，未装则 skip）；`make gate` **11/11**；`baseline_check` **未发现退化**。
+实测：测试 **283 → 343**（缺 `pypdf`/OCR 依赖时相关用例 skip）；`make gate` **12/12**；`baseline_check` **未发现退化**。
+`/api/ingest` 上传 Excel 发票 → 建单成功；四份 PDF + Excel 混传 → 五单齐套 `FIX`。
 
-**未接**：Excel（`route=table`）、OCR（`route=ocr`）。实施计划与验收标准见
-**`docs/10-raw-data-ingest.md`**；新会话按该文档第 4 节开工。
+**未做**：MinerU 可选后端（RapidOCR 已够用，接口留位）；真实脱敏扫描件评测。
+计划与验收标准见 **`docs/10-raw-data-ingest.md`** 第 4.7 / 5.6 节。
 
 ## 13. 风险
 

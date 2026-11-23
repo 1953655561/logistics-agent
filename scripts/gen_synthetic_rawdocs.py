@@ -138,6 +138,153 @@ def build_invoice_xlsx(inv: dict, out: Path) -> None:
     wb.save(out)
 
 
+# ---------------- Excel 五单（一个工作簿五个 sheet） ----------------
+def _xlsx_kv_sheet(wb, sheet_name: str, title: str, pairs: list[tuple[str, str]],
+                   item_headers: list[str] | None = None,
+                   item_rows: list[list] | None = None,
+                   summary: list[tuple[str, object]] | None = None) -> None:
+    """按「标签 | 值」两列一组铺单头，再按需铺明细表与汇总行。
+
+    合并单元格是故意留的：Excel 适配器要先展开合并区域再取值。
+    """
+    ws = wb.create_sheet(sheet_name)
+
+    thin = Side(style="thin", color="999999")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    head_fill = PatternFill("solid", fgColor="DDEBF7")
+    label_font = Font(name=FONT_CN, size=10, bold=True)
+    body_font = Font(name=FONT_CN, size=10)
+
+    for i, width in enumerate([10, 24, 16, 22, 10, 8, 12, 14, 30], 1):
+        ws.column_dimensions[get_column_letter(i)].width = width
+
+    ws.merge_cells("A1:I1")
+    ws["A1"] = title
+    ws["A1"].font = Font(name=FONT_CN, size=15, bold=True)
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 28
+
+    r = 3
+    for i, (label, value) in enumerate(pairs):
+        row = r + i // 2
+        col = 1 if i % 2 == 0 else 5
+        ws.cell(row, col, label).font = label_font
+        ws.merge_cells(start_row=row, start_column=col,
+                       end_row=row, end_column=col + 1)
+        ws.cell(row, col + 2, value).font = body_font
+        ws.merge_cells(start_row=row, start_column=col + 2,
+                       end_row=row, end_column=col + 3)
+        for c in range(col, col + 4):
+            ws.cell(row, c).border = border
+    r = r + (len(pairs) + 1) // 2
+
+    if item_headers:
+        r += 1
+        for i, name in enumerate(item_headers, 1):
+            cell = ws.cell(r, i, name)
+            cell.font = label_font
+            cell.fill = head_fill
+            cell.border = border
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        r += 1
+        for values in item_rows or []:
+            for i, value in enumerate(values, 1):
+                cell = ws.cell(r, i, value)
+                cell.font = body_font
+                cell.border = border
+            r += 1
+
+    for label, value in summary or []:
+        ws.cell(r, 6, label).font = label_font
+        ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=7)
+        ws.cell(r, 8, value).font = label_font
+        ws.cell(r, 8).number_format = "0.00"
+        ws.cell(r, 8).alignment = Alignment(horizontal="right")
+        for c in range(6, 9):
+            ws.cell(r, c).border = border
+        r += 1
+
+    ws.cell(r + 1, 1, "备注 Remark：合成数据，仅用于系统测试，不含真实企业信息。").font = \
+        Font(name=FONT_CN, size=9, color="808080")
+
+
+def _doc_item_row(it: dict) -> list:
+    elements = it.get("elements") or {}
+    return [1, it["name"], it["hs_code"], it["qty"], it["unit"], it["unit_price"],
+            it["amount"], f'{it.get("legal_unit1", "个")}/{it.get("legal_unit2", "千克")}',
+            "|".join(f"{k}={v}" for k, v in elements.items())]
+
+
+def build_five_xlsx(data: dict, out: Path) -> None:
+    """一个工作簿五个 sheet：合同 / 发票 / 装箱单 / 提单 / 报关单。
+
+    用于验证「多 sheet 逐张判类型」和「纯 Excel 端到端」；数据与五份 PDF 同源。
+    """
+    c, inv, p, b, d = (data["contract"], data["invoice"], data["packing_list"],
+                       data["bl"], data["declaration"])
+    it = inv["items"][0]
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    _xlsx_kv_sheet(wb, "合同", "合 同  CONTRACT", [
+        ("合同号", c["contract_no"]), ("日期", c["date"]),
+        ("卖方", c["seller"]), ("买方", c["buyer"]),
+        ("币制", c["currency"]), ("成交方式", c["incoterm"]),
+        ("合同总额", c["total_amount"]), ("条款", c["terms"]),
+        ("付款方式", c["payment"]),
+    ])
+
+    _xlsx_kv_sheet(wb, "商业发票", "商 业 发 票  COMMERCIAL INVOICE", [
+        ("发票号", inv["invoice_no"]), ("合同号", inv["contract_no"]),
+        ("发票日期", inv["date"]), ("卖方", inv["seller"]),
+        ("买方", inv["buyer"]), ("币制", inv["currency"]),
+        ("成交方式", inv["incoterm"]), ("付款方式", "T/T 30 days"),
+    ], item_headers=["序号", "品名", "规格/型号", "HS 编码", "数量", "单位", "单价", "金额"],
+       item_rows=[[1, it["name"], it.get("elements", {}).get("spec", "通用"),
+                   it["hs_code"], it["qty"], it["unit"],
+                   it["unit_price"], it["amount"]]],
+       summary=[("折扣 Discount", inv.get("discount", 0.0)),
+                ("佣金 Commission", inv.get("commission", 0.0)),
+                ("特许权使用费 Royalty", inv.get("royalty", 0.0)),
+                ("发票总额 Total Amount", inv["total_amount"])])
+
+    _xlsx_kv_sheet(wb, "装箱单", "装 箱 单  PACKING LIST", [
+        ("装箱单号", p["pl_no"]), ("日期", p["date"]),
+        ("件数", p["packages"]), ("包装种类", p["package_type"]),
+        ("毛重", p["gross_weight"]), ("净重", p["net_weight"]),
+        ("体积", p["volume"]), ("唛头", f'{p["marks"]["port"]} / {p["marks"]["text"]}'),
+        ("木包装", "是" if p.get("wood_packaging") else "否"),
+    ], item_headers=ITEM_COLS, item_rows=[_doc_item_row(p["items"][0])])
+
+    _xlsx_kv_sheet(wb, "提单", "提 单  BILL OF LADING", [
+        ("提单号", b["bl_no"]), ("日期", b["date"]),
+        ("到港日", b["arrival_date"]), ("船名", b["vessel"]),
+        ("航次", b["voyage"]), ("起运港", b["pol"]),
+        ("目的港", b["pod"]), ("发货人", b["shipper"]),
+        ("收货人", b["consignee"]), ("通知人", b["notify"]),
+        ("件数", b["packages"]), ("毛重", b["gross_weight"]),
+        ("体积", b.get("volume", 0)),
+    ], item_headers=ITEM_COLS, item_rows=[_doc_item_row(b["items"][0])])
+
+    _xlsx_kv_sheet(wb, "报关单", "中华人民共和国海关进口货物报关单", [
+        ("报关单号", d["decl_no"]), ("申报日期", d["declare_date"]),
+        ("收发货人", d["consignee"]), ("运输方式", d["transport_mode"]),
+        ("贸易方式", d["trade_mode"]), ("征免性质", d["exemption_nature"]),
+        ("启运国", d["origin_country"]), ("装货港", d["loading_port"]),
+        ("境内目的地", d["destination"]), ("成交方式", d["incoterm"]),
+        ("币制", d["currency"]), ("运费", d.get("freight", 0.0)),
+        ("保费", d.get("insurance", 0.0)), ("合同号", d["contract_no"]),
+        ("提单号", d["bl_no"]), ("件数", d.get("packages", "")),
+        ("毛重", d.get("gross_weight", "")), ("净重", d.get("net_weight", "")),
+        ("总价", d["total_amount"]), ("许可证号", d.get("license_no") or "无"),
+        ("证书号", d.get("cert_no") or "无"),
+    ], item_headers=ITEM_COLS, item_rows=[_doc_item_row(d["items"][0])])
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(out)
+
+
 # ---------------- HTML 公共 ----------------
 CSS = """
 @page { size: A4; margin: 12mm; }
@@ -182,24 +329,32 @@ def declaration_html(d: dict) -> str:
         ("币制", d["currency"], "运费", f'{d.get("freight", 0):.2f}'),
         ("保费", f'{d.get("insurance", 0):.2f}', "合同号", d["contract_no"]),
         ("提单号", d["bl_no"], "许可证号", d.get("license_no") or "无"),
+        ("证书号", d.get("cert_no") or "无", "海关", d.get("customs_office", "")),
     ]
+    elements = it.get("elements") or {}
+    element_text = "|".join(f"{k}={v}" for k, v in elements.items())
     cells = []
     for k1, v1, k2, v2 in rows:
         cells.append(f'<div class="cell k">{k1}</div><div class="cell span2">{v1}</div>'
                      f'<div class="cell k">{k2}</div><div class="cell span2">{v2}</div>')
-    return f"""<!doctype html><html><head><meta charset="utf-8"><style>{CSS}</style></head><body>
+    # 扫描件字号比文字层大一档：150 DPI 下 8–11px 小字 OCR 很容易误识别
+    scan_css = ("body{font-size:13px}.cell{font-size:13px}"
+                "table th,table td{font-size:12px}"
+                ".items th,.items td{font-size:10px}")
+    return f"""<!doctype html><html><head><meta charset="utf-8"><style>{CSS}{scan_css}</style></head><body>
 <div class="doc">
   <div class="title">中华人民共和国海关进口货物报关单</div>
   <div class="sub">合成数据 · 仅用于系统测试</div>
   <div class="grid">{''.join(cells)}</div>
   <table>
     <tr><th>项号</th><th>商品编号</th><th>商品名称及规格型号</th><th>数量</th><th>单位</th>
-        <th>单价</th><th>总价</th><th>原产国</th><th>法定单位</th></tr>
+        <th>单价</th><th>总价</th><th>法定单位</th><th>申报要素</th></tr>
     <tr><td class="num">1</td><td>{it['hs_code']}</td>
-        <td>{it['name']}（{it.get('elements',{}).get('spec','通用')}）</td>
+        <td>{it['name']}（{elements.get('spec', '通用')}）</td>
         <td class="num">{it['qty']}</td><td>{it['unit']}</td>
         <td class="num">{it['unit_price']:.2f}</td><td class="num">{it['amount']:.2f}</td>
-        <td>{it['origin']}</td><td>{it['legal_unit1']} / {it['legal_unit2']}</td></tr>
+        <td>{it['legal_unit1']} / {it['legal_unit2']}</td>
+        <td>{element_text}</td></tr>
     <tr><td colspan="3">合计</td><td class="num">{d.get('qty_total') or it['qty']}</td><td></td>
         <td></td><td class="num">{d['total_amount']:.2f}</td><td colspan="2"></td></tr>
   </table>
@@ -319,13 +474,12 @@ def simple_doc_html(title: str, pairs: list[tuple[str, str]], items: list[list[s
 </div></body></html>"""
 
 
-def build_five_pdfs(data: dict, edge: str, tmp: Path, profile: Path, out_dir: Path) -> list[Path]:
-    """按统一版式生成五份 PDF，供文本抽取器消费。"""
+def _five_doc_pages(data: dict) -> dict:
+    """五单页面的统一内容（文字层 PDF 与扫描件共用）。"""
     c, inv, p, b, d = (data["contract"], data["invoice"], data["packing_list"],
                        data["bl"], data["declaration"])
     items = [item_row(inv["items"][0])]
-
-    docs = {
+    return {
         "合同-HT-2026-0901": ("合 同  CONTRACT", [
             ("合同号", c["contract_no"]), ("卖方", c["seller"]), ("买方", c["buyer"]),
             ("日期", c["date"]), ("币制", c["currency"]), ("成交方式", c["incoterm"]),
@@ -365,6 +519,10 @@ def build_five_pdfs(data: dict, edge: str, tmp: Path, profile: Path, out_dir: Pa
             [item_row(d["items"][0])]),
     }
 
+
+def build_five_pdfs(data: dict, edge: str, tmp: Path, profile: Path, out_dir: Path) -> list[Path]:
+    """按统一版式生成五份 PDF，供文本抽取器消费。"""
+    docs = _five_doc_pages(data)
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for name, (title, pairs, rows) in docs.items():
@@ -376,6 +534,38 @@ def build_five_pdfs(data: dict, edge: str, tmp: Path, profile: Path, out_dir: Pa
     return written
 
 
+def build_five_scan_pdf(data: dict, edge: str, tmp: Path, profile: Path, out: Path) -> Path:
+    """五页扫描件：合同/发票/装箱单/提单/报关单各一页，无文字层。
+
+    装箱单与报关单用专用版式（报关单字号更大、带申报要素），其余用通用版式。
+    """
+    docs = _five_doc_pages(data)
+    names = ["合同-HT-2026-0901", "发票-INV-2026-0901", "装箱单-PL-2026-0901",
+             "提单-SYN-2026-0901", "报关单-DEC-2026-0901"]
+    pages = []
+    for index, name in enumerate(names, 1):
+        if name.startswith("装箱单"):
+            html_text = packing_html(data["packing_list"], data["bl"])
+        elif name.startswith("报关单"):
+            html_text = declaration_html(data["declaration"])
+        else:
+            # 通用版式的字号偏小，扫描件单独放大一档，改进 150 DPI 下的 OCR
+            html_text = simple_doc_html(*docs[name]).replace(
+                "</head>",
+                "<style>body{font-size:15px}table th,table td{font-size:14px}"
+                ".items th,.items td{font-size:11px}</style></head>")
+        html = tmp / f"scan_{index}.html"
+        html.write_text(html_text, encoding="utf-8")
+        shot = tmp / f"scan_{index}_shot.png"
+        edge_png(edge, html, shot, profile)
+        page = tmp / f"scan_{index}.png"
+        scan_effect(shot, page)
+        pages.append(page)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    build_scanned_pdf(pages, out)
+    return out
+
+
 def main() -> int:
     data = json.loads(SRC.read_text(encoding="utf-8"))
     OUT.mkdir(parents=True, exist_ok=True)
@@ -384,11 +574,13 @@ def main() -> int:
     profile = tmp / "edge-profile"
 
     xlsx = OUT / "合成发票-INV-2026-0901.xlsx"
+    five_xlsx = OUT / "合成五单-2026-0901.xlsx"
     pdf = OUT / "合成报关单-DEC-2026-0901.pdf"
     png = OUT / "合成装箱单-PL-2026-0901.png"
     scanned = OUT / "合成扫描件-多页.pdf"
 
     build_invoice_xlsx(data["invoice"], xlsx)
+    build_five_xlsx(data, five_xlsx)
 
     decl_html = tmp / "declaration.html"
     decl_html.write_text(declaration_html(data["declaration"]), encoding="utf-8")
@@ -410,7 +602,11 @@ def main() -> int:
     # 成套五份文字层 PDF（供文本抽取链路使用）
     five = build_five_pdfs(data, edge, tmp, profile, OUT / "pdf")
 
-    for f in (xlsx, pdf, png, scanned):
+    # 五页扫描件（合同/发票/装箱单/提单/报关单各一页，无文字层）
+    five_scan = build_five_scan_pdf(data, edge, tmp, profile,
+                                    OUT / "合成扫描件-五单.pdf")
+
+    for f in (xlsx, five_xlsx, pdf, png, scanned, five_scan):
         print(f"{f.name}\t{f.stat().st_size} bytes")
     for f in five:
         print(f"pdf/{f.name}\t{f.stat().st_size} bytes")

@@ -1,5 +1,17 @@
 .card {
   min-width: 0;
+  /* 让卡片头可以 sticky（AntD 卡片默认可能裁切） */
+  overflow: visible;
+}
+
+/* P1：详情卡片头吸顶，滚长问题清单时 case_id / 审批按钮始终可见 */
+.card :global(.ant-card-head) {
+  position: sticky;
+  top: 64px;
+  z-index: 20;
+  background: #fff;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 1px 0 #eef2f7;
 }
 
 .title {
@@ -72,4 +84,59 @@
 .center {
   padding: 40px;
   text-align: center;
+}
+
+/* P0：元信息压成一行 chips，替代原来的两列 Descriptions */
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  margin: 10px 0 6px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+}
+
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.reviewLine {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+/* 历史提示：折叠 + 去重后的单行 */
+.hints {
+  margin: 10px 0 6px;
+}
+
+.hintCases {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.issueFilter {
+  margin: 0 0 10px;
+}
+
+/* P1：证据从 JSON 改成 chips */
+.evidence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: 6px;
+  font-size: 12px;
 }

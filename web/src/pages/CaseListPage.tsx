@@ -3,6 +3,8 @@ import {
   App as AntApp,
   Button,
   Card,
+  Input,
+  Segmented,
   Select,
   Space,
   Table,
@@ -13,7 +15,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type CaseSummary } from "../api/client";
 import ImportCaseModal from "../components/ImportCaseModal";
-import { Money, StatusTag, VerdictTag } from "../components/tags";
+import { Money, StatusTag, VerdictTag, formatTime } from "../components/tags";
 import styles from "./CaseListPage.module.css";
 
 interface Props {
@@ -26,9 +28,34 @@ export default function CaseListPage({ selectedId, onSelect }: Props) {
   const queryClient = useQueryClient();
   const [scenarioId, setScenarioId] = useState<string>("");
   const [importOpen, setImportOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [stateFilter, setStateFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
 
   const cases = useQuery({ queryKey: ["cases"], queryFn: () => api.listCases() });
   const scenarios = useQuery({ queryKey: ["scenarios"], queryFn: api.listScenarios });
+
+  const stateCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: (cases.data ?? []).length };
+    for (const c of cases.data ?? []) counts[c.state] = (counts[c.state] ?? 0) + 1;
+    return counts;
+  }, [cases.data]);
+
+  const filtered = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    return (cases.data ?? []).filter((c) => {
+      const matchQ =
+        !kw ||
+        c.case_id.toLowerCase().includes(kw) ||
+        (c.title ?? "").toLowerCase().includes(kw);
+      const matchS = stateFilter === "all" || c.state === stateFilter;
+      return matchQ && matchS;
+    });
+  }, [cases.data, q, stateFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, stateFilter]);
 
   useEffect(() => {
     if (!scenarioId && scenarios.data?.length) {
@@ -52,7 +79,8 @@ export default function CaseListPage({ selectedId, onSelect }: Props) {
       {
         title: "审核单",
         dataIndex: "case_id",
-        width: 104,
+        width: 168,
+        ellipsis: { showTitle: true },
         render: (v: string) => <Typography.Text code>{v}</Typography.Text>,
       },
       {
@@ -88,9 +116,11 @@ export default function CaseListPage({ selectedId, onSelect }: Props) {
       {
         title: "更新",
         dataIndex: "updated_at",
-        width: 148,
-        ellipsis: true,
-        render: (v: string) => <Typography.Text type="secondary">{v || "—"}</Typography.Text>,
+        width: 116,
+        align: "right",
+        render: (v: string) => (
+          <Typography.Text type="secondary">{formatTime(v)}</Typography.Text>
+        ),
       },
     ],
     [],
@@ -141,16 +171,51 @@ export default function CaseListPage({ selectedId, onSelect }: Props) {
         ) : null}
       </div>
 
+      <div className={styles.filters}>
+        <Input
+          allowClear
+          className={styles.search}
+          placeholder="搜索单号或标题"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <Segmented
+          size="small"
+          value={stateFilter}
+          onChange={(v) => setStateFilter(String(v))}
+          options={[
+            { label: `全部 ${stateCounts.all ?? 0}`, value: "all" },
+            { label: `待审批 ${stateCounts.PENDING_APPROVAL ?? 0}`, value: "PENDING_APPROVAL" },
+            { label: `已通过 ${stateCounts.APPROVED ?? 0}`, value: "APPROVED" },
+            { label: `已退回 ${stateCounts.RETURNED ?? 0}`, value: "RETURNED" },
+          ]}
+        />
+        {q || stateFilter !== "all" ? (
+          <Typography.Text type="secondary">匹配 {filtered.length} 条</Typography.Text>
+        ) : null}
+      </div>
+
       <Table<CaseSummary>
         className={styles.table}
         rowKey="case_id"
         size="middle"
         loading={cases.isLoading}
-        dataSource={cases.data ?? []}
+        dataSource={filtered}
         columns={columns}
-        pagination={{ pageSize: 10, showSizeChanger: false, size: "small" }}
-        scroll={{ x: 760 }}
-        locale={{ emptyText: "暂无审核单，点「新建审核」开始" }}
+        pagination={{
+          pageSize: 10,
+          current: page,
+          onChange: setPage,
+          showSizeChanger: false,
+          size: "small",
+        }}
+        scroll={{ x: 820 }}
+        locale={{
+          emptyText:
+            q || stateFilter !== "all"
+              ? "没有匹配的审核单"
+              : "暂无审核单，点「新建审核」开始",
+        }}
         rowClassName={(r) => (r.case_id === selectedId ? styles.rowActive : "")}
         onRow={(r) => ({
           onClick: () => onSelect(r.case_id),

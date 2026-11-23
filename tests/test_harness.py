@@ -74,6 +74,22 @@ class TestTools(unittest.TestCase):
         with self.assertRaises(ToolError):
             self.reg.register(Tool("t", "", {"type": "object", "properties": {}}, lambda: 1))
 
+    def test_whitelist_rejects_tool_outside_allowlist(self):
+        reg = ToolRegistry(allowed=frozenset({"echo"}))
+        reg.register(Tool("echo", "echo", {"type": "object", "properties": {}}, lambda: 1))
+        reg.register(Tool("shell.exec", "危险动作",
+                          {"type": "object", "properties": {}}, lambda: 2))
+        self.assertTrue(reg.call("echo").ok)
+        bad = reg.call("shell.exec")
+        self.assertFalse(bad.ok)
+        self.assertIn("白名单", bad.error)
+
+    def test_build_registry_enforces_whitelist(self):
+        from src.harness.guardrails import ALLOWED_TOOLS
+        reg = build_registry(docs_of("IMP-0001"))
+        self.assertEqual(reg.allowed, ALLOWED_TOOLS)
+        self.assertEqual(set(reg.names()), set(ALLOWED_TOOLS))
+
 
 class TestState(unittest.TestCase):
     def test_transitions(self):

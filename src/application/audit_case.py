@@ -30,7 +30,8 @@ class CaseService:
                  tracer_factory=None, policy: dict | None = None, max_steps: int = 8,
                  pause_for_approval: bool = False, reviewer=None,
                  cost_meter: CostMeter | None = None, rate_limiter=None,
-                 memory=None, mode: str = "scripted", planner=None):
+                 memory=None, mode: str = "scripted", planner=None,
+                 skill=None):
         self.repo = repo
         self.approver = approver
         self.llm = llm
@@ -46,6 +47,8 @@ class CaseService:
         self.memory = memory
         self.mode = mode
         self.planner = planner
+        # 技能只影响说明文本的写法（拼进 _summarize 的系统提示），不参与判定
+        self.skill = skill
 
     # ---------- 幂等提交（推荐入口） ----------
     def submit(self, case_id: str, docs: dict) -> dict:
@@ -100,6 +103,7 @@ class CaseService:
                 reviewer=self.reviewer, guard_findings=guard_findings,
                 cost_meter=self.cost_meter, rate_limiter=self.rate_limiter,
                 mode=self.mode, planner=self.planner, memory={},
+                skill=self.skill,
             ).run(case_id)
         finally:
             trace_events = tracer.events()

@@ -2,9 +2,9 @@
 
     python scripts/alert.py
 
-读取四份评测报告：
-`evals/report/{result,perf,redteam,hallucination}.json`，
-复用 `scripts/gate.py::checks()` 的 11 项阈值（单一事实源，不另抄一份）。
+读取五份评测报告：
+`evals/report/{result,perf,redteam,hallucination,extraction}.json`，
+复用 `scripts/gate.py::checks()` 的 12 项阈值（单一事实源，不另抄一份）。
 
 - 任意一项不过 → 写 `var/alerts/<时间戳>.json`，打印失败项，返回 1；
 - 全部通过 → 不产生文件，返回 0；
@@ -29,7 +29,8 @@ import gate                                                    # noqa: E402
 
 REPORT = os.path.join(ROOT, "evals", "report")
 ALERTS = os.path.join(ROOT, "var", "alerts")
-FILES = ("result.json", "perf.json", "redteam.json", "hallucination.json")
+FILES = ("result.json", "perf.json", "redteam.json",
+         "hallucination.json", "extraction.json")
 WEBHOOK_ENV = "LOGIAGENT_ALERT_WEBHOOK"
 
 
@@ -85,7 +86,8 @@ def run(report_dir: str = REPORT, alerts_dir: str = ALERTS,
     data, missing = load_reports(report_dir)
     items = gate.checks(data.get("result") or {}, data.get("perf") or {},
                         data.get("redteam") or {},
-                        data.get("hallucination") or {})
+                        data.get("hallucination") or {},
+                        data.get("extraction") or {})
     failed = [{"name": name, "actual": actual}
               for name, ok, actual in items if not ok]
 

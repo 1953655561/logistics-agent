@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
@@ -19,7 +20,9 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src.app.wiring import build_web_api                   # noqa: E402
-from src.application.web_api import WebApi, WebApiError    # noqa: E402
+from src.application.web_api import (                       # noqa: E402
+    MAX_UPLOAD_TOTAL_BYTES, WebApi, WebApiError,
+)
 
 FALLBACK_INDEX = os.path.join(ROOT, "web", "fallback", "index.html")
 CONTENT_TYPES = {".html": "text/html; charset=utf-8",
@@ -64,6 +67,48 @@ class Handler(BaseHTTPRequestHandler):
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise WebApiError("请求体不是合法 JSON")
 
+    def _multipart(self) -> tuple[dict, list[dict]]:
+        """最小 multipart/form-data 解析：支持文本字段 + 文件（无第三方依赖）。"""
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise WebApiError("请求体为空")
+        if length > MAX_UPLOAD_TOTAL_BYTES + 2 * 1024 * 1024:
+            raise WebApiError("上传总量过大", status=413)
+        raw = self.rfile.read(length)
+        content_type = self.headers.get("Content-Type", "")
+        match = re.search(r'boundary=(?:"([^"]+)"|([^;]+))', content_type)
+        if not match:
+            raise WebApiError("缺少 multipart boundary")
+        boundary = (match.group(1) or match.group(2)).strip()
+        delimiter = b"--" + boundary.encode("utf-8")
+        fields: dict = {}
+        files: list[dict] = []
+        for part in raw.split(delimiter)[1:]:
+            if part.startswith(b"--"):
+                break
+            if part.startswith(b"\r\n"):
+                part = part[2:]
+            if b"\r\n\r\n" not in part:
+                continue
+            header_blob, content = part.split(b"\r\n\r\n", 1)
+            if content.endswith(b"\r\n"):
+                content = content[:-2]
+            headers = {}
+            for line in header_blob.decode("utf-8", "replace").split("\r\n"):
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    headers[key.strip().lower()] = value.strip()
+            disposition = headers.get("content-disposition", "")
+            name_match = re.search(r'name="([^"]*)"', disposition)
+            file_match = re.search(r'filename="([^"]*)"', disposition)
+            if not name_match:
+                continue
+            if file_match:
+                files.append({"filename": file_match.group(1), "content": content})
+            else:
+                fields[name_match.group(1)] = content.decode("utf-8", "replace")
+        return fields, files
+
     # ---------- 路由 ----------
     def do_OPTIONS(self):
         self._send(204, b"", "text/plain")
@@ -89,6 +134,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(self.web.get_case(case_id))
                 if len(parts) == 4 and parts[3] == "docs":
                     return self._json(self.web.get_docs(case_id))
+                if len(parts) == 4 and parts[3] == "ingest":
+                    return self._json(self.web.get_ingest(case_id))
                 if len(parts) == 4 and parts[3] == "trace":
                     return self._json(self.web.get_trace(case_id))
             if path.startswith("/api/"):
@@ -102,6 +149,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = unquote(urlparse(self.path).path)
         try:
+            if path == "/api/ingest":
+                content_type = self.headers.get("Content-Type", "")
+                if not content_type.lower().startswith("multipart/form-data"):
+                    return self._error("需要 multipart/form-data", 415)
+                fields, files = self._multipart()
+                return self._json(self.web.ingest_files(
+                    files, str(fields.get("case_id", ""))))
             body = self._body()
             if path == "/api/cases/import":
                 return self._json(self.web.import_case(

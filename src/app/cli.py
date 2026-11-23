@@ -26,6 +26,7 @@ from src.application.audit_case import CaseService   # noqa: E402
 from src.harness.approval import AutoApprover, CliApprover  # noqa: E402
 from src.harness.cost import CostMeter               # noqa: E402
 from src.harness.ratelimit import TokenBucket        # noqa: E402
+from src.harness.skills import load_default_skill    # noqa: E402
 
 VAR = os.path.join(ROOT, "var")
 
@@ -60,7 +61,7 @@ def _service(args) -> CaseService:
                        trace_dir=os.path.join(VAR, "traces"),
                        pause_for_approval=getattr(args, "pause", False),
                        reviewer=reviewer, cost_meter=CostMeter(),
-                       rate_limiter=limiter)
+                       rate_limiter=limiter, skill=load_default_skill())
 
 
 def cmd_audit(args):

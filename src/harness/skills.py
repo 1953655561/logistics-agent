@@ -28,6 +28,9 @@ import os
 from dataclasses import dataclass, field
 
 DEFAULT_SKILL_NAME = "document-audit"
+SKILL_ENV = "LOGIAGENT_SKILL"
+# 关闭技能的环境变量取值（默认开启）
+_OFF_VALUES = ("0", "off", "false", "no")
 _FRONT_MATTER = "---"
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
@@ -116,6 +119,17 @@ def default_skill(dir: str = "skills") -> Skill | None:
         if folder == DEFAULT_SKILL_NAME:
             return skill
     return None
+
+
+def load_default_skill(dir: str = "skills") -> Skill | None:
+    """主链路用：加载默认审核技能，`LOGIAGENT_SKILL=off` 时明确不加载。
+
+    - 目录不存在 → 返回 None（能跑，只是没有技能说明）；
+    - 技能文件语法错误 → 照常抛 ValueError（不静默降级，宁可在启动时暴露）。
+    """
+    if os.environ.get(SKILL_ENV, "").strip().lower() in _OFF_VALUES:
+        return None
+    return default_skill(dir)
 
 
 # ---------------- 内部解析 ----------------

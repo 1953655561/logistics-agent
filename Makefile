@@ -4,13 +4,13 @@ CASE ?= IMP-0025
 PORT ?= 8000
 IMAGE ?= logistics-agent:latest
 
-.PHONY: test eval runner review judge redteam perf hallucination shadow modes retrieval vectors async gate baseline baseline-check ci web-install web-types web-build web-dev demo demo-script api mcp show audit ask list sample-cases docker-build docker-run docker-up clean
+.PHONY: test eval runner review judge redteam perf hallucination shadow modes retrieval vectors extraction async gate baseline baseline-check ci web-install web-types web-build web-dev demo demo-script api mcp show audit ask list sample-cases docker-build docker-run docker-up clean
 
 test:
 	$(PY) -m unittest discover -s tests -v
 
-# 一键跑全部评测：主评测 + 复核对照 + Judge + 红队 + 性能 + 幻觉 + 模式 + 检索 + 影子
-eval: runner review judge redteam perf hallucination modes retrieval shadow
+# 一键跑全部评测：主评测 + 复核对照 + Judge + 红队 + 性能 + 幻觉 + 模式 + 检索 + 影子 + 抽取层
+eval: runner review judge redteam perf hallucination modes retrieval shadow extraction
 
 runner:
 	$(PY) evals/runner.py --json
@@ -47,11 +47,15 @@ retrieval:
 vectors:
 	$(PY) evals/vectors.py
 
+# 抽取层评测：字段准确率 + 字段 CER（OCR 路由需要 requirements-ocr.txt）
+extraction:
+	$(PY) evals/extraction.py
+
 # 真实 ASGI 并发基准（并发 10 的端到端 P50/P95）
 async:
 	$(PY) scripts/async_bench.py
 
-# 指标门禁：准确率/召回/误报/引用/成本/P95/红队/幻觉（11 项）
+# 指标门禁：准确率/召回/误报/引用/成本/P95/红队/幻觉/抽取层（12 项）
 gate:
 	$(PY) scripts/gate.py
 

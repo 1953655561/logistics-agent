@@ -18,7 +18,8 @@ from data.synth.scenarios import CASES                      # noqa: E402
 from src.adapters.llm_mock import MockLLM                   # noqa: E402
 from src.harness.loop import AuditLoop                      # noqa: E402
 from src.harness.skills import (DEFAULT_SKILL_NAME,          # noqa: E402
-                                default_skill, discover, load_skill)
+                                default_skill, discover, load_default_skill,
+                                load_skill)
 from src.harness.tracing import MemoryTracer                # noqa: E402
 from src.tools.audit_tools import build_registry            # noqa: E402
 
@@ -182,6 +183,56 @@ class TestLoopSkillIntegration(unittest.TestCase):
         res = self._run(docs, skill=BrokenSkill(), tracer=tracer)
         self.assertEqual(res.verdict, self._run(docs).verdict)
         self.assertTrue(any(e.get("kind") == "skill.failed" for e in tracer.events()))
+
+
+class TestSkillWiring(unittest.TestCase):
+    """补线：技能不能只是「有实现」，要真的接进主链路（W6.6）。"""
+
+    def _api(self):
+        from src.app.wiring import build_web_api
+        # 关掉复核/限流/记忆，减少无关依赖
+        return build_web_api(offline=True, review=False,
+                             ratelimit=False, memory=False)
+
+    def test_web_api_wires_default_skill(self):
+        api = self._api()
+        self.assertIsNotNone(api.service.skill)
+        self.assertEqual(api.service.skill.name, DEFAULT_SKILL_NAME)
+        # health 也要能看出技能是否启用，不能只靠日志猜
+        self.assertTrue(api.health()["skill"]["enabled"])
+        self.assertEqual(api.health()["skill"]["name"], DEFAULT_SKILL_NAME)
+
+    def test_env_off_disables_skill(self):
+        old = os.environ.get("LOGIAGENT_SKILL")
+        os.environ["LOGIAGENT_SKILL"] = "off"
+        try:
+            self.assertIsNone(load_default_skill(SKILLS_DIR))
+            self.assertIsNone(self._api().service.skill)
+        finally:
+            if old is None:
+                os.environ.pop("LOGIAGENT_SKILL", None)
+            else:
+                os.environ["LOGIAGENT_SKILL"] = old
+
+    def test_skill_block_reaches_llm_prompt(self):
+        """接线是否真的生效：系统提示里必须出现技能块。"""
+        class Capture:
+            name = "capture"
+
+            def __init__(self):
+                self.messages = []
+
+            def complete(self, messages, schema=None, max_tokens=512):
+                self.messages.append(messages)
+                return {"text": "ok", "model": "capture", "usage": {}}
+
+        llm = Capture()
+        skill = default_skill(SKILLS_DIR)
+        AuditLoop(build_registry(docs_of("IMP-0019")), MemoryTracer(),
+                  llm, skill=skill).run("SKILL-LLM")
+        system = llm.messages[-1][0]["content"]
+        self.assertIn(f"【技能开始：{skill.name}】", system)
+        self.assertIn(skill.body.strip()[:40], system)
 
 
 if __name__ == "__main__":

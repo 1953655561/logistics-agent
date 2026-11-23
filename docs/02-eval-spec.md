@@ -215,9 +215,9 @@ token 按字符估算，只用于演示与回归，报告中会标注。
 W5 实测：串行 P95 约 5ms；并发 10 P95 约 80ms（mock、单进程内存压测），
 P95/成本/错误率三项全部通过。该数字**不代表生产环境**，生产还需叠加网络、数据库与真实模型耗时。
 
-## 9. W6 指标门禁（2026-10-26，v1.6 扩到 11 项）
+## 9. W6/W7 指标门禁（W6 11 项 → W7 扩到 12 项）
 
-`make gate` 读四份 JSON（`result.json` / `perf.json` / `redteam.json` / `hallucination.json`），11 项全过才返回 0：
+`make gate` 读五份 JSON（`result.json` / `perf.json` / `redteam.json` / `hallucination.json` / `extraction.json`），12 项全过才返回 0：
 
 | # | 指标 | 阈值 |
 |---|---|---|
@@ -232,6 +232,10 @@ P95/成本/错误率三项全部通过。该数字**不代表生产环境**，�
 | 9 | `auto_change_hs` | 0 |
 | 10 | 无引用断言率（`uncited_rate`） | ≤ 0%（观测值 0，先观测后设线） |
 | 11 | 引用不可回查率（`broken_citation_rate`） | ≤ 0%（观测值 0） |
+| 12 | 抽取字段准确率（至少 Excel + 文字层 PDF 两条路由） | ≥ 90% |
+
+第 12 项来自 `evals/extraction.py`；OCR 依赖缺失时该路由 skip，但至少要有 Excel + 文字层 PDF
+两条路由，避免门禁"假绿"。缺 `extraction.json` 按失败处理。
 
 CI 里 `make eval && make gate`，任何指标退化都会阻止合入；`scripts/alert.py` 用同一套
 `gate.checks()`，失败时写 `var/alerts/*.json` 并可选 webhook 通知。

@@ -1,0 +1,7 @@
+# OCR 可选依赖（P1）：不装也能跑核心测试；扫描 PDF/图片识别需要它。
+#   pip install -r requirements-ocr.txt
+# 同时带上读 PDF/图片的基础依赖，单独安装也能跑扫描件。
+pypdf>=4.0
+Pillow>=10.0
+rapidocr_onnxruntime>=1.4,<2
+onnxruntime>=1.17

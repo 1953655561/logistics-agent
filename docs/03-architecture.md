@@ -274,6 +274,10 @@ FastAPI 适配器 ──► application.WebApi ──► CaseService ──► A
   审批 Drawer、评测指标（准确率/召回/误报/成本/P95/逐条结果）。
 - **单证导入**：`POST /api/cases/import`（`{case_id?, docs}`）做结构校验、`sanitize_docs`、
   落盘 `var/docs/{case_id}.json`，并自动处理编号冲突；Web 端支持粘贴/上传/载入示例。
+- **原始文件上传（W7）**：`POST /api/ingest`（`multipart/form-data`，字段 `files`、`case_id?`）→
+  `src/ingest/pipeline.py` 三路抽取 → 五单 JSON → 走同一套 `import_case` 建单；原始文件留档
+  `var/uploads/{case_id}/`，解析记录写 `var/docs/{case_id}.ingest.json`，`GET /api/cases/{id}/ingest` 回查。
+  单文件 20MB、单次 12 个、总量 60MB；`.xls` 明确提示另存 `.xlsx`。
 - **契约驱动**：FastAPI 自动出 OpenAPI → `openapi-typescript` 生成 `web/src/types/api.ts`，
   前端不手写 DTO。
 - **兜底**：`make demo` 用 `http.server` 起服务；有 `web/dist` 就服务 AntD 构建，没有就服务
@@ -293,6 +297,8 @@ in that same thread`；这是 W5 实测暴露出来的，不是设计出来的�
 - 成本已按可配置单价折算；mock 模型的 token 是按字符估算，只有接真实模型后才准确。
 - 限流是**单进程内存令牌桶**，多实例部署需要换成 Redis 等共享计数（接口已隔离在 `ratelimit.py`）。
 - 复核 Agent 的 LLM 路径未做大规模人工评估；当前报告基于确定性检查 + mock。
+- 原始文件上传只校验扩展名/大小（20MB/文件、12 个/次），**没有病毒扫描/内容安全**，
+  生产落地需补；OCR 是同步解析，大文件/多页会占用请求线程。
 
 ## 14. 扩展点（改这些不用动核心）
 
@@ -316,21 +322,26 @@ in that same thread`；这是 W5 实测暴露出来的，不是设计出来的�
 node:24-alpine ──pnpm build──► /app/web/dist
                                    │
 python:3.12-slim ──COPY────────────┘
-  ├─ pip install -r requirements-web.txt
+  ├─ pip install -r requirements-web.txt -r requirements-ingest.txt
+  ├─ 可选：--build-arg WITH_OCR=1 → 再装 requirements-ocr.txt（RapidOCR）
+  ├─ compose 默认 WITH_OCR=1；裸 docker build 默认 0
   ├─ COPY src / data / evals
   ├─ 非 root 用户 appuser
   └─ CMD python -m src.app.api --host 0.0.0.0 --port 8000
 ```
 
 - `Dockerfile`：前端构建与 Python 运行时分离，运行镜像不带 Node；
-- `docker-compose.yml`：映射 8000、挂 `./var`（审核单与 trace 持久化）、healthcheck；
+  默认装 Excel/PDF 解析依赖；`WITH_OCR=0` 为默认，`--build-arg WITH_OCR=1` 加装扫描件 OCR；
+- `docker-compose.yml`：映射 8000、挂 `./var`（审核单、上传原件、trace 持久化）、healthcheck；
+  **compose 默认 `WITH_OCR=1`（带 OCR）**，`WITH_OCR=0 docker compose up --build` 可省体积；
 - `.dockerignore`：排除 `node_modules` / `dist` / `var` / 图片，构建上下文可控；
 - 容器内 `GET /api/health` 作为 healthcheck，失败会自动标记 unhealthy。
 
 ```bash
-make docker-build      # docker build -t logistics-agent:latest .
+make docker-build      # docker build -t logistics-agent:latest .（不含 OCR）
+docker build --build-arg WITH_OCR=1 -t logistics-agent:ocr .
 make docker-run        # docker run --rm -p 8000:8000 -v $(CURDIR)/var:/app/var ...
-make docker-up         # docker compose up --build
+make docker-up         # docker compose up --build（默认含 OCR）
 ```
 
 ### 15.2 CI（GitHub Actions）

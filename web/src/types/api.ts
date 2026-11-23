@@ -55,6 +55,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ingest */
+        post: operations["ingest_api_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cases/{case_id}/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ingest */
+        get: operations["get_ingest_api_cases__case_id__ingest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cases/{case_id}": {
         parameters: {
             query?: never;
@@ -117,6 +151,40 @@ export interface paths {
         put?: never;
         /** Audit */
         post: operations["audit_api_cases__case_id__audit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/extract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Extract */
+        post: operations["extract_api_extract_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cases/{case_id}/ask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask */
+        post: operations["ask_api_cases__case_id__ask_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -228,10 +296,60 @@ export interface components {
              */
             comment: string;
         };
+        /** AskOut */
+        AskOut: {
+            /** Case Id */
+            case_id: string;
+            /** Question */
+            question: string;
+            /**
+             * Intent
+             * @default
+             */
+            intent: string;
+            /**
+             * Answer
+             * @default
+             */
+            answer: string;
+            /** Evidence */
+            evidence?: Record<string, never>[];
+            /** Citations */
+            citations?: Record<string, never>[];
+            /** Tools Called */
+            tools_called?: string[];
+            /**
+             * Confidence
+             * @default low
+             */
+            confidence: string;
+            /**
+             * Uncited
+             * @default false
+             */
+            uncited: boolean;
+            /** Guard */
+            guard?: unknown[];
+        };
+        /** AskRequest */
+        AskRequest: {
+            /** Question */
+            question: string;
+        };
         /** AuditRequest */
         AuditRequest: {
             /** Docs */
             docs?: Record<string, never> | null;
+        };
+        /** Body_ingest_api_ingest_post */
+        Body_ingest_api_ingest_post: {
+            /** Files */
+            files: string[];
+            /**
+             * Case Id
+             * @default
+             */
+            case_id: string;
         };
         /** CaseDetail */
         CaseDetail: {
@@ -397,6 +515,29 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** ExtractOut */
+        ExtractOut: {
+            /** Docs */
+            docs?: Record<string, never>;
+            /** Confidence */
+            confidence?: {
+                [key: string]: number;
+            };
+            /** Needs Human */
+            needs_human?: string[];
+            /** Missing Docs */
+            missing_docs?: string[];
+            /**
+             * Method
+             * @default rules
+             */
+            method: string;
+        };
+        /** ExtractRequest */
+        ExtractRequest: {
+            /** Text */
+            text: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -416,6 +557,8 @@ export interface components {
              * @default 0
              */
             rules: number;
+            /** Model */
+            model?: Record<string, never>;
         };
         /** ImportRequest */
         ImportRequest: {
@@ -426,6 +569,83 @@ export interface components {
             case_id: string;
             /** Docs */
             docs: Record<string, never>;
+        };
+        /**
+         * IngestOut
+         * @description 原始文件解析结果 + 审核单详情。
+         */
+        IngestOut: {
+            /** Case Id */
+            case_id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /** State */
+            state: string;
+            /**
+             * Verdict
+             * @default
+             */
+            verdict: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Issue Count
+             * @default 0
+             */
+            issue_count: number;
+            /** Issues */
+            issues?: components["schemas"]["IssueOut"][];
+            /** Citations */
+            citations?: components["schemas"]["CitationOut"][];
+            review?: components["schemas"]["ReviewOut"];
+            /** Guard */
+            guard?: Record<string, never>[];
+            usage?: components["schemas"]["UsageOut"];
+            /**
+             * Cost
+             * @default 0
+             */
+            cost: number;
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /**
+             * Rate Limited
+             * @default false
+             */
+            rate_limited: boolean;
+            /** Steps */
+            steps?: components["schemas"]["StepOut"][];
+            approval?: components["schemas"]["ApprovalOut"] | null;
+            /** Idempotency */
+            idempotency?: Record<string, never> | null;
+            /** Docs Digest */
+            docs_digest?: Record<string, never>;
+            /**
+             * Has Trace
+             * @default false
+             */
+            has_trace: boolean;
+            /**
+             * Created At
+             * @default
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * @default
+             */
+            updated_at: string;
+            /** Ingest */
+            ingest?: Record<string, never>;
         };
         /** IssueOut */
         IssueOut: {
@@ -728,6 +948,70 @@ export interface operations {
             };
         };
     };
+    ingest_api_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_ingest_api_ingest_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ingest_api_cases__case_id__ingest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_case_api_cases__case_id__get: {
         parameters: {
             query?: never;
@@ -843,6 +1127,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CaseDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    extract_api_extract_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExtractRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtractOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_api_cases__case_id__ask_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskOut"];
                 };
             };
             /** @description Validation Error */

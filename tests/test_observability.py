@@ -150,6 +150,10 @@ def _passing_reports():
         "redteam.json": {"blocked": 10, "forbidden": 0},
         "hallucination.json": {"uncited_rate": 0.0,
                                "broken_citation_rate": 0.0},
+        "extraction.json": {"routes": [
+            {"route": "Excel（发票）", "skipped": False, "field_accuracy": 1.0},
+            {"route": "文字层 PDF（五单）", "skipped": False, "field_accuracy": 1.0},
+        ]},
     }
 
 
@@ -160,20 +164,22 @@ def _write_reports(directory, reports):
             json.dump(payload, f, ensure_ascii=False)
 
 
-class TestGateHasElevenChecks(unittest.TestCase):
-    def _call(self, hall):
+class TestGateHasTwelveChecks(unittest.TestCase):
+    def _call(self, hall, extraction=None):
         reports = _passing_reports()
+        if extraction is None:
+            extraction = reports["extraction.json"]
         return gate.checks(reports["result.json"], reports["perf.json"],
-                           reports["redteam.json"], hall)
+                           reports["redteam.json"], hall, extraction)
 
-    def test_returns_eleven_items(self):
+    def test_returns_twelve_items(self):
         items = self._call({"uncited_rate": 0.0, "broken_citation_rate": 0.0})
-        self.assertEqual(len(items), 11)
+        self.assertEqual(len(items), 12)
         self.assertTrue(all(ok for _, ok, _ in items))
 
-    def test_hallucination_items_are_the_last_two(self):
+    def test_hallucination_items_are_ninth_and_tenth(self):
         items = self._call({"uncited_rate": 0.5, "broken_citation_rate": 0.5})
-        self.assertEqual(len(items), 11)
+        self.assertEqual(len(items), 12)
         self.assertFalse(items[9][1])
         self.assertFalse(items[10][1])
         self.assertIn("无引用断言", items[9][0])
@@ -183,6 +189,12 @@ class TestGateHasElevenChecks(unittest.TestCase):
         items = self._call({})
         self.assertFalse(items[9][1])
         self.assertFalse(items[10][1])
+
+    def test_extraction_item_fails_closed(self):
+        items = self._call({"uncited_rate": 0.0, "broken_citation_rate": 0.0},
+                           extraction={})
+        self.assertFalse(items[11][1])
+        self.assertIn("抽取字段准确率", items[11][0])
 
 
 class TestAlert(unittest.TestCase):
@@ -205,7 +217,7 @@ class TestAlert(unittest.TestCase):
                 payload = json.load(f)
             names = [item["name"] for item in payload["failed"]]
             self.assertIn("结论准确率 ≥ 95%", names)
-            self.assertEqual(payload["gate_total"], 11)
+            self.assertEqual(payload["gate_total"], 12)
 
     def test_passing_gate_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:

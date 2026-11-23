@@ -14,8 +14,14 @@ from .audit_case import CaseService
 
 KNOWN_DOCS = ("contract", "invoice", "packing_list", "bl", "declaration")
 MAX_DOCS_BYTES = 1_000_000          # 导入 JSON 上限，避免误传大文件
+MAX_UPLOAD_FILES = 12
+MAX_UPLOAD_FILE_BYTES = 20 * 1024 * 1024
+MAX_UPLOAD_TOTAL_BYTES = 60 * 1024 * 1024
+UPLOAD_EXTS = {".xlsx", ".xlsm", ".pdf", ".png", ".jpg", ".jpeg",
+               ".bmp", ".tif", ".tiff", ".webp"}
 _CASE_ID_RE = re.compile(r"[^A-Za-z0-9_-]+")
 _CASE_ID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_FILENAME_BAD = re.compile(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+")
 
 
 def validate_docs(docs) -> list[str]:
@@ -100,8 +106,11 @@ class WebApi:
         else:
             model["offline"] = llm_name in ("", "mock")
             model["active"] = "mock" if model["offline"] else llm_name
+        skill = getattr(self.service, "skill", None)
         return {"status": "ok", "scenarios": len(self.scenarios),
-                "rules": len(self.rules), "model": model}
+                "rules": len(self.rules), "model": model,
+                "skill": {"name": getattr(skill, "name", ""),
+                          "enabled": skill is not None}}
 
     def list_scenarios(self) -> list[dict]:
         return [self._scenario(s) for s in self.scenarios]
@@ -229,6 +238,87 @@ class WebApi:
         except ValueError as exc:
             raise WebApiError(str(exc), status=400) from exc
 
+    def ingest_files(self, files: list[dict], case_id: str = "") -> dict:
+        """原始文件（Excel / PDF / 图片）→ 五单 JSON → 建审核单。
+
+        解析失败不静默放行：要么明确报错，要么把低置信/缺字段写进 ingest.files，
+        由详情页的「原始单证」页签展示。原始文件会留档到 ``var/uploads/<case_id>/``。
+        """
+        if not isinstance(files, list) or not files:
+            raise WebApiError("请至少上传一个文件")
+        if len(files) > MAX_UPLOAD_FILES:
+            raise WebApiError(f"一次最多上传 {MAX_UPLOAD_FILES} 个文件")
+
+        cleaned: list[tuple[str, bytes]] = []
+        errors: list[str] = []
+        total = 0
+        for item in files:
+            filename = str(item.get("filename") or "upload.bin")
+            content = item.get("content") or b""
+            if not isinstance(content, (bytes, bytearray)):
+                errors.append(f"{filename}: 内容不是二进制")
+                continue
+            payload = bytes(content)
+            name = self._safe_upload_name(filename)
+            ext = os.path.splitext(name)[1].lower()
+            if ext == ".xls":
+                errors.append(f"{name}: 旧版 .xls 不支持，请另存为 .xlsx")
+                continue
+            if ext not in UPLOAD_EXTS:
+                errors.append(f"{name}: 不支持的格式（{ext or '无扩展名'}）")
+                continue
+            if not payload:
+                errors.append(f"{name}: 空文件")
+                continue
+            if len(payload) > MAX_UPLOAD_FILE_BYTES:
+                errors.append(f"{name}: 超过 {MAX_UPLOAD_FILE_BYTES // 1024 // 1024}MB")
+                continue
+            total += len(payload)
+            cleaned.append((name, payload))
+        if total > MAX_UPLOAD_TOTAL_BYTES:
+            errors.append(f"上传总量超过 {MAX_UPLOAD_TOTAL_BYTES // 1024 // 1024}MB")
+        if errors:
+            raise WebApiError("；".join(errors))
+
+        cid = self._unique_case_id(case_id)
+        paths = self._save_uploads(cid, cleaned)
+
+        from ..ingest.pipeline import ingest as ingest_paths
+
+        try:
+            docs, details = ingest_paths([str(path) for path in paths])
+        except ImportError as exc:
+            raise WebApiError(f"缺少原始文件解析依赖：{exc}", status=500) from exc
+        except Exception as exc:  # noqa: BLE001 - 解析失败要让用户看到原因
+            raise WebApiError(
+                f"原始文件解析失败：{type(exc).__name__}: {exc}", status=500) from exc
+
+        if not docs:
+            statuses = "；".join(
+                f"{os.path.basename(str(d.get('path') or ''))}: {d.get('status', '未识别')}"
+                for d in details) or "没有可识别的内容"
+            raise WebApiError(f"未识别出可审核的单证：{statuses}")
+        if not any(key in docs for key in ("invoice", "declaration")):
+            raise WebApiError("解析出的单证里没有发票或报关单，至少需要其中一份才能审核")
+
+        detail = self.import_case(cid, docs)
+        meta = self._ingest_meta(detail["case_id"], details, docs)
+        self._store_ingest(detail["case_id"], meta)
+        detail["ingest"] = meta
+        return detail
+
+    def get_ingest(self, case_id: str) -> dict:
+        """某票审核单的原始文件解析记录（没有则 available=false）。"""
+        self._require(case_id)
+        path = self._ingest_path(case_id)
+        if not path or not os.path.exists(path):
+            return {"case_id": case_id, "available": False, "files": [],
+                    "docs": [], "missing_docs": []}
+        with open(path, encoding="utf-8") as f:
+            meta = json.load(f)
+        meta["available"] = True
+        return meta
+
     def ask(self, case_id: str, question: str) -> dict:
         """追问：只读，不写回审核单。答案必须带证据，缺证据回「无法确认」。"""
         from .ask import AskService
@@ -282,6 +372,90 @@ class WebApi:
         os.makedirs(self.docs_dir, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(docs, f, ensure_ascii=False, indent=2)
+
+    # ---------- 原始文件上传 ----------
+    @staticmethod
+    def _safe_upload_name(filename: str) -> str:
+        """只留文件名本身，防 ../ 路径穿越；保留扩展名。"""
+        name = os.path.basename(str(filename).replace("\\", "/"))
+        name = _FILENAME_BAD.sub("_", name).strip().lstrip(".")
+        stem, ext = os.path.splitext(name)
+        stem = (stem or "upload")[:60]
+        return f"{stem}{ext.lower()[:8]}" or "upload.bin"
+
+    def _uploads_dir(self, case_id: str) -> str:
+        base = os.path.abspath(os.path.join(
+            os.path.dirname(self.docs_dir), "uploads"))
+        path = os.path.abspath(os.path.join(base, case_id))
+        if not path.startswith(base + os.sep):
+            raise WebApiError("上传目录越界", status=403)
+        return path
+
+    def _save_uploads(self, case_id: str, files: list[tuple[str, bytes]]) -> list[str]:
+        directory = self._uploads_dir(case_id)
+        os.makedirs(directory, exist_ok=True)
+        written: list[str] = []
+        used: set[str] = set()
+        for name, content in files:
+            stem, ext = os.path.splitext(name)
+            candidate, n = name, 2
+            while candidate in used or os.path.exists(os.path.join(directory, candidate)):
+                candidate = f"{stem}-{n}{ext}"
+                n += 1
+            path = os.path.join(directory, candidate)
+            if not os.path.abspath(path).startswith(directory + os.sep):
+                raise WebApiError("上传文件路径越界", status=403)
+            with open(path, "wb") as f:
+                f.write(content)
+            used.add(candidate)
+            written.append(path)
+        return written
+
+    def _ingest_path(self, case_id: str) -> str | None:
+        if not _CASE_ID_OK.match(case_id or ""):
+            return None
+        return os.path.join(self.docs_dir, f"{case_id}.ingest.json")
+
+    def _store_ingest(self, case_id: str, meta: dict) -> None:
+        path = self._ingest_path(case_id)
+        if not path:
+            return
+        os.makedirs(self.docs_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    def _ingest_meta(self, case_id: str, details: list[dict], docs: dict) -> dict:
+        files = []
+        for detail in details:
+            confidence = detail.get("confidence")
+            files.append({
+                "filename": os.path.basename(str(detail.get("path") or "")),
+                "route": detail.get("route", ""),
+                "doc_type": detail.get("doc_type"),
+                "sheet": detail.get("sheet"),
+                "page": detail.get("page"),
+                "engine": detail.get("engine"),
+                "confidence": confidence,
+                "ocr_confidence": detail.get("ocr_confidence"),
+                "missing": detail.get("missing") or [],
+                "checks": detail.get("checks") or [],
+                "status": detail.get("status", ""),
+            })
+        missing_docs = [key for key in KNOWN_DOCS if key not in docs]
+        needs_human = any(
+            item["status"] != "ok"
+            or item["doc_type"] is None
+            or bool(item["missing"])
+            or (isinstance(item["confidence"], (int, float)) and item["confidence"] < 0.9)
+            for item in files
+        )
+        return {
+            "case_id": case_id,
+            "docs": sorted(docs),
+            "missing_docs": missing_docs,
+            "needs_human": needs_human,
+            "files": files,
+        }
 
     def _unique_case_id(self, requested: str) -> str:
         raw = (requested or "").strip()
